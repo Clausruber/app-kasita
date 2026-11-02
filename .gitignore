@@ -1,0 +1,12 @@
+node_modules/
+functions/lib/
+functions/.secret.local
+*.local
+.env*.local
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebaserc
+.firebase/
+.claude/
+.claude-launch-tmp

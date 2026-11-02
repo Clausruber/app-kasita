@@ -1,0 +1,23 @@
+# Firebase App Hosting config. Create the secret with:
+#   (reuses the DF_ZERNIO_API_KEY secret already created for the functions)
+#   firebase apphosting:secrets:grantaccess DF_ZERNIO_API_KEY --backend <backend-id>
+#   firebase apphosting:secrets:grantaccess DF_AI_ENCRYPTION_KEY --backend <backend-id>
+runConfig:
+  minInstances: 0
+  maxInstances: 4
+
+env:
+  - variable: ZERNIO_API_KEY
+    secret: DF_ZERNIO_API_KEY
+  - variable: DF_AI_ENCRYPTION_KEY
+    secret: DF_AI_ENCRYPTION_KEY
+  - variable: NEXT_PUBLIC_APP_NAME
+    value: Autolix
+  - variable: NEXT_PUBLIC_FUNCTIONS_REGION
+    value: us-central1
+  # NEXT_PUBLIC_FIREBASE_* are injected automatically by App Hosting (FIREBASE_WEBAPP_CONFIG),
+  # but set them explicitly if your build needs them:
+  # - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+  #   value: your-project-id
+  # - variable: NEXT_PUBLIC_APP_URL
+  #   value: https://your-backend--your-project.us-central1.hosted.app

@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function dfSignedIn() { return request.auth != null; }
+    function dfOnlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+    // Team member of workspace `ws`: the server-only index written when the invitation was accepted
+    // (rules can read it even though clients cannot). Inactive members lose access at once.
+    function dfMemberOf(ws) {
+      let idx = /databases/$(database)/documents/DEMO-FIREBASE/_system/members/$(request.auth.uid);
+      return exists(idx) && get(idx).data.ownerUid == ws && get(idx).data.status == 'active';
+    }
+
+    // Server-only routing indexes (Admin SDK bypasses rules).
+    match /DEMO-FIREBASE/_system/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /DEMO-FIREBASE/{uid} {
+      // Owner of the workspace, or an active member of its team.
+      function dfIsOwner() { return dfSignedIn() && (request.auth.uid == uid || dfMemberOf(uid)); }
+
+      allow read: if dfIsOwner();
+      allow update: if dfSignedIn() && request.auth.uid == uid && dfOnlyChanges(['displayName', 'timezone']);
+
+      match /accounts/{accountId} {
+        allow read: if dfIsOwner();
+      }
+
+      match /posts/{postId} {
+        allow read: if dfIsOwner();
+        // Clients may only clear unread counters; everything else goes through the API/functions.
+        allow update: if dfIsOwner() && dfOnlyChanges(['unreadCount']);
+
+        match /messages/{messageId} {
+          allow read: if dfIsOwner();
+          allow update: if dfIsOwner() && dfOnlyChanges(['read']);
+        }
+      }
+
+      // Service agendas and bookings: read-only for the owner; writes go through the API/functions
+      // (bookings use a transaction on agendas/{id}/days/{date} so a slot is never given twice).
+      match /agendas/{agendaId}/{document=**} {
+        allow read: if dfIsOwner();
+      }
+      match /agendas/{agendaId} {
+        allow read: if dfIsOwner();
+      }
+      match /bookings/{bookingId} {
+        allow read: if dfIsOwner();
+      }
+
+      match /conversations/{convId} {
+        allow read: if dfIsOwner();
+        allow update: if dfIsOwner() && dfOnlyChanges(['unreadCount']);
+
+        match /messages/{messageId} {
+          allow read: if dfIsOwner();
+          allow update: if dfIsOwner() && dfOnlyChanges(['read']);
+        }
+      }
+    }
+
+    // Unified inbox: collectionGroup('messages') where uid == workspace.
+    // `kind` limits it to this app's docs, so other apps' `messages` subcollections are not opened up.
+    match /{path=**}/messages/{messageId} {
+      allow read: if dfSignedIn()
+        && resource.data.kind in ['comment', 'dm']
+        && (resource.data.uid == request.auth.uid || dfMemberOf(resource.data.uid));
+    }
+  }
+}
