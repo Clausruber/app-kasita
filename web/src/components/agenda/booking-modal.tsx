@@ -22,8 +22,8 @@ type BookInput = {
   customer: { clientId?: string; firstName: string; lastName: string; whatsapp: string };
 };
 
-const slotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "dfGetSlots");
-const bookFn = httpsCallable<BookInput, Booked>(functions, "dfBookSlot");
+const slotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "alGetSlots");
+const bookFn = httpsCallable<BookInput, Booked>(functions, "alBookSlot");
 
 export type BookingPrefill = {
   agendaId?: string;

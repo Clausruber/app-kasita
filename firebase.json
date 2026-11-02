@@ -6,7 +6,7 @@
   "functions": [
     {
       "source": "functions",
-      "codebase": "demo-firebase",
+      "codebase": "app-autolix",
       "ignore": [
         "node_modules",
         ".git",
@@ -19,7 +19,7 @@
   ],
   "hosting": [
     {
-      "site": "base-autolix",
+      "site": "app-autolix",
       "source": "web",
       "frameworksBackend": {
         "region": "us-central1",

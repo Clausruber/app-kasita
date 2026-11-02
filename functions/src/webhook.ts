@@ -244,7 +244,7 @@ async function handleAccountDisconnected(uid: string, p: Json) {
  * One webhook per account (Zernio key): its URL carries ?tenant=<uid> and it is signed with that
  * account's own secret. Without ?tenant= it is the legacy webhook signed with DF_ZERNIO_WEBHOOK_SECRET.
  */
-export const dfZernioWebhook = onRequest({ secrets: [ZERNIO_WEBHOOK_SECRET, DF_AI_ENCRYPTION_KEY], cors: false }, async (req, res) => {
+export const alZernioWebhook = onRequest({ secrets: [ZERNIO_WEBHOOK_SECRET, DF_AI_ENCRYPTION_KEY], cors: false }, async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
     return;

@@ -5,6 +5,8 @@ import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import {
   aiKnowledgeDoc,
   aiKnowledgeFilesCol,
+  MESSAGES,
+  ROOT,
   conversationMessagesCol,
   globalAiDoc,
   postDoc,
@@ -510,8 +512,8 @@ async function onIncoming(uid: string, ref: FirebaseFirestore.DocumentReference,
 }
 
 /** Runs the agent on every new incoming comment, according to the user's mode. */
-export const dfAgentOnComment = onDocumentCreated(
-  { document: "DEMO-FIREBASE/{uid}/posts/{postId}/messages/{messageId}", secrets: [DF_AI_ENCRYPTION_KEY] },
+export const alAgentOnComment = onDocumentCreated(
+  { document: `${ROOT}/{uid}/posts/{postId}/${MESSAGES}/{messageId}`, secrets: [DF_AI_ENCRYPTION_KEY] },
   async (event) => {
     const { uid, postId, messageId } = event.params;
     const m = event.data?.data();
@@ -521,8 +523,8 @@ export const dfAgentOnComment = onDocumentCreated(
 );
 
 /** Same for direct messages. */
-export const dfAgentOnDm = onDocumentCreated(
-  { document: "DEMO-FIREBASE/{uid}/conversations/{convId}/messages/{messageId}", secrets: [DF_AI_ENCRYPTION_KEY] },
+export const alAgentOnDm = onDocumentCreated(
+  { document: `${ROOT}/{uid}/conversations/{convId}/${MESSAGES}/{messageId}`, secrets: [DF_AI_ENCRYPTION_KEY] },
   async (event) => {
     const { uid, convId, messageId } = event.params;
     const m = event.data?.data();
@@ -532,7 +534,7 @@ export const dfAgentOnDm = onDocumentCreated(
 );
 
 /** On-demand draft ("Sugerir con IA"), in any mode, optionally guided by a note. Comments or DMs. */
-export const dfSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const alSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
   const { postId, conversationId, messageId, note } = req.data as { postId?: string; conversationId?: string; messageId?: string; note?: string };
   if ((!postId && !conversationId) || !messageId) throw new HttpsError("invalid-argument", "Faltan postId/conversationId o messageId");

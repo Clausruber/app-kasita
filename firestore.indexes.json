@@ -1,7 +1,7 @@
 {
   "indexes": [
     {
-      "collectionGroup": "messages",
+      "collectionGroup": "alMessages",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
         { "fieldPath": "kind", "order": "ASCENDING" },

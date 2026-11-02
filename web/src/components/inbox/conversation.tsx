@@ -17,12 +17,12 @@ import { cn } from "@/lib/utils";
 
 const replyFn = httpsCallable<{ postId: string; messageId: string; requestId: string } & SendInput>(
   functions,
-  "dfReplyToComment",
+  "alReplyToComment",
 );
-const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "dfHideComment");
+const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "alHideComment");
 const suggestFn = httpsCallable<{ postId: string; messageId: string; note?: string }, { reply: string }>(
   functions,
-  "dfSuggestReply",
+  "alSuggestReply",
 );
 
 /** The selected user's thread (oldest first) + reply composer. The post is shown in column 1. */

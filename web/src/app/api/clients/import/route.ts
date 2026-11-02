@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { withPerm } from "@/lib/auth-guard";
 import { adminDb } from "@/lib/firebase/admin";
-import { clientDoc } from "@/lib/firebase/paths";
+import { MESSAGES, clientDoc } from "@/lib/firebase/paths";
 import { authorKeyOf, clientIdOf } from "@/lib/clients";
 
 type Agg = {
@@ -23,7 +23,7 @@ type Agg = {
  */
 export const POST = withPerm("clients", async (_req, user) => {
   const snap = await adminDb
-    .collectionGroup("messages")
+    .collectionGroup(MESSAGES)
     .where("uid", "==", user.uid)
     .where("kind", "in", ["comment", "dm"])
     .orderBy("createdAt", "desc")

@@ -11,16 +11,16 @@ firestore.rules, firestore.indexes.json, firebase.json
 scripts/test-webhook.mjs   envía un webhook firmado al emulador
 ```
 
-## Datos en Firestore (todo bajo `DEMO-FIREBASE`)
+## Datos en Firestore (todo bajo `app-autolix`)
 
 | Ruta | Quién escribe |
 |---|---|
-| `DEMO-FIREBASE/{uid}` | API (al primer uso crea el perfil en Zernio) |
-| `DEMO-FIREBASE/{uid}/accounts/{accountId}` | API |
-| `DEMO-FIREBASE/{uid}/posts/{postId}` | API al crear; webhook actualiza estado |
-| `DEMO-FIREBASE/{uid}/posts/{postId}/messages/{commentId}` | webhook / `dfReplyToComment` |
-| `DEMO-FIREBASE/{uid}/conversations/{convId}/messages/{id}` | webhook (DMs) |
-| `DEMO-FIREBASE/_system/zernio{Profiles,Accounts,Posts}/{id}` | índices de enrutado, solo servidor |
+| `app-autolix/{uid}` | API (al primer uso crea el perfil en Zernio) |
+| `app-autolix/{uid}/accounts/{accountId}` | API |
+| `app-autolix/{uid}/posts/{postId}` | API al crear; webhook actualiza estado |
+| `app-autolix/{uid}/posts/{postId}/alMessages/{commentId}` | webhook / `alReplyToComment` |
+| `app-autolix/{uid}/conversations/{convId}/messages/{id}` | webhook (DMs) |
+| `app-autolix/_system/zernio{Profiles,Accounts,Posts}/{id}` | índices de enrutado, solo servidor |
 
 La UI solo lee Firestore con `onSnapshot`. El id de cada mensaje es el id del comentario de la red,
 así reintentos de webhook y nuestras propias respuestas no se duplican.
@@ -49,8 +49,8 @@ y en Secret Manager (`DF_ZERNIO_API_KEY`).
 2. `firebase use --add <project-id>`
 3. Secretos de las funciones:
    `firebase functions:secrets:set DF_ZERNIO_API_KEY` y `firebase functions:secrets:set DF_ZERNIO_WEBHOOK_SECRET`
-4. `firebase deploy --only functions:demo-firebase` (codebase propio: no toca otras funciones del proyecto). Las reglas e índices de Firestore se agregan a mano si el proyecto comparte reglas con otra app.
-5. Registra el webhook en Zernio (`POST /v1/webhooks/settings`) con la URL de `dfZernioWebhook`,
+4. `firebase deploy --only functions:app-autolix` (codebase propio: no toca otras funciones del proyecto). Las reglas e índices de Firestore se agregan a mano si el proyecto comparte reglas con otra app.
+5. Registra el webhook en Zernio (`POST /v1/webhooks/settings`) con la URL de `alZernioWebhook`,
    el mismo secreto y los eventos `comment.received`, `message.received`, `message.sent`,
    `post.published`, `post.failed`, `post.partial`, `account.disconnected`.
 6. Web en App Hosting: crea el backend apuntando a `web/`, da acceso al secreto con `firebase apphosting:secrets:grantaccess DF_ZERNIO_API_KEY --backend <id>`

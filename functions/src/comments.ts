@@ -183,7 +183,7 @@ export async function sendDm(uid: string, convId: string, messageId: string | un
   return { id: ref.id, booking };
 }
 
-export const dfReplyToDm = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const alReplyToDm = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
   const { conversationId, messageId, text, requestId, booking, saveClient } = req.data as {
     conversationId?: string;
@@ -197,7 +197,7 @@ export const dfReplyToDm = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (re
   return sendDm(uid, conversationId, messageId, text, { requestId, sentBy: "user", booking, saveClient });
 });
 
-export const dfReplyToComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const alReplyToComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
   const { postId, messageId, text, requestId, attachmentUrl, booking, saveClient } = req.data as {
     postId?: string;
@@ -213,7 +213,7 @@ export const dfReplyToComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, asyn
   return sendReply(uid, postId, messageId, text, { attachmentUrl, requestId, sentBy: "user", booking, saveClient });
 });
 
-export const dfHideComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const alHideComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
   const { postId, messageId, hidden = true } = req.data as { postId?: string; messageId?: string; hidden?: boolean };
   if (!postId || !messageId) throw new HttpsError("invalid-argument", "Faltan postId o messageId");

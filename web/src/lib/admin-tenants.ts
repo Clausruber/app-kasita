@@ -21,7 +21,7 @@ export const WEBHOOK_EVENTS = [
 
 function webhookBaseUrl() {
   const project = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  return process.env.DF_WEBHOOK_URL || `https://us-central1-${project}.cloudfunctions.net/dfZernioWebhook`;
+  return process.env.DF_WEBHOOK_URL || `https://us-central1-${project}.cloudfunctions.net/alZernioWebhook`;
 }
 
 export type TenantRow = {
@@ -88,7 +88,7 @@ async function assertZernioKey(key: string) {
 
 /**
  * Sets an account's Zernio key: validates it, registers a webhook for that Zernio account pointing to
- * dfZernioWebhook?tenant=<uid> with its own secret, and removes the previous webhook if the key changed.
+ * alZernioWebhook?tenant=<uid> with its own secret, and removes the previous webhook if the key changed.
  */
 export async function setTenantZernioKey(uid: string, key: string, actor: string) {
   if (!/^sk_[A-Za-z0-9]{16,}$/.test(key)) throw new HttpError(400, "La API key de Zernio debe empezar por sk_");

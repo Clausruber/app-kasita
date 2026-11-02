@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { collection, collectionGroup, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import {
+  MESSAGES,
   accountsCol,
   agendasCol,
   bookingsCol,
@@ -75,7 +76,7 @@ export function useInbox(max = 200) {
       ? (set) =>
           onSnapshot(
             query(
-              collectionGroup(db, "messages"),
+              collectionGroup(db, MESSAGES),
               where("uid", "==", ws),
               where("kind", "in", ["comment", "dm"]), // required by the security rule
               orderBy("createdAt", "desc"),

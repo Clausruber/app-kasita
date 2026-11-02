@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys the Next.js web app to Firebase Hosting (site base-autolix, SSR in Cloud Functions).
+# Deploys the Next.js web app to Firebase Hosting (site app-autolix, SSR in Cloud Functions).
 # Usage (from the repo root, in Git Bash):  bash scripts/deploy-web.sh
 #
 # - web/.env.local is moved aside during the deploy so its local secrets and the local service
@@ -17,4 +17,4 @@ fi
 rm -rf .firebase
 
 IS_WEBPACK_TEST=1 FUNCTIONS_DISCOVERY_TIMEOUT=120 \
-  firebase deploy --only hosting:base-autolix --project autolix-d71c4
+  firebase deploy --only hosting:app-autolix --project autolix-d71c4

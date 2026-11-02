@@ -1,16 +1,19 @@
 // Single source of truth for Firestore paths. Everything hangs off ROOT.
 // Keep in sync with functions/src/paths.ts.
-export const ROOT = "DEMO-FIREBASE";
+export const ROOT = "app-autolix";
 export const SYSTEM = "_system";
+// Own collection id for comments/DMs: collectionGroup queries of other apps in the project
+// (which use "messages") never see these docs, and ours never see theirs.
+export const MESSAGES = "alMessages";
 
 export const userDoc = (uid: string) => `${ROOT}/${uid}`;
 export const postsCol = (uid: string) => `${ROOT}/${uid}/posts`;
 export const postDoc = (uid: string, postId: string) => `${postsCol(uid)}/${postId}`;
-export const postMessagesCol = (uid: string, postId: string) => `${postDoc(uid, postId)}/messages`;
+export const postMessagesCol = (uid: string, postId: string) => `${postDoc(uid, postId)}/${MESSAGES}`;
 export const accountsCol = (uid: string) => `${ROOT}/${uid}/accounts`;
 export const conversationsCol = (uid: string) => `${ROOT}/${uid}/conversations`;
 export const conversationMessagesCol = (uid: string, convId: string) =>
-  `${conversationsCol(uid)}/${convId}/messages`;
+  `${conversationsCol(uid)}/${convId}/${MESSAGES}`;
 
 // Server-only lookup indexes (clients are denied by rules).
 export const zernioProfileIndex = (profileId: string) =>

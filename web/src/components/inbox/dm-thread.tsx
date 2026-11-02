@@ -14,8 +14,8 @@ import { Avatar } from "@/components/inbox/commenter-list";
 import { BookingChip, Composer, type SendInput } from "@/components/inbox/composer";
 import { cn } from "@/lib/utils";
 
-const replyFn = httpsCallable<{ conversationId: string; messageId?: string; requestId: string } & SendInput>(functions, "dfReplyToDm");
-const suggestFn = httpsCallable<{ conversationId: string; messageId: string; note?: string }, { reply: string }>(functions, "dfSuggestReply");
+const replyFn = httpsCallable<{ conversationId: string; messageId?: string; requestId: string } & SendInput>(functions, "alReplyToDm");
+const suggestFn = httpsCallable<{ conversationId: string; messageId: string; note?: string }, { reply: string }>(functions, "alSuggestReply");
 
 const nameOf = (c: Conversation) => c.participant?.name || "Usuario";
 

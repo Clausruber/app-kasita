@@ -14,9 +14,9 @@ import { cn } from "@/lib/utils";
 import { useCan } from "@/hooks/use-me";
 
 type Slot = { start: number; time: string; label: string };
-const getSlotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "dfGetSlots");
-export const confirmBookingFn = httpsCallable<{ bookingId: string }>(functions, "dfConfirmBooking");
-export const cancelBookingFn = httpsCallable<{ bookingId: string }>(functions, "dfCancelBooking");
+const getSlotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "alGetSlots");
+export const confirmBookingFn = httpsCallable<{ bookingId: string }>(functions, "alConfirmBooking");
+export const cancelBookingFn = httpsCallable<{ bookingId: string }>(functions, "alCancelBooking");
 
 /** Today (YYYY-MM-DD) in a timezone. */
 export const todayIn = (tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());

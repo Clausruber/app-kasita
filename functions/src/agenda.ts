@@ -307,7 +307,7 @@ export async function customerBookings(uid: string, authorId: string) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
-export const dfGetSlots = onCall(async (req) => {
+export const alGetSlots = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda");
   const { agendaId, date } = req.data as { agendaId?: string; date?: string };
   if (!agendaId || !date || !DATE_RE.test(date)) throw new HttpsError("invalid-argument", "Faltan agendaId o date");
@@ -321,7 +321,7 @@ export const dfGetSlots = onCall(async (req) => {
  * Booking from the Agenda page / "Agendar" modal. The booking is linked to a client: the chosen one,
  * the one with that WhatsApp, or a new manual client (created only once the slot is secured).
  */
-export const dfBookSlot = onCall(async (req) => {
+export const alBookSlot = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
   const { agendaId, date, time, customer, notes } = req.data as {
     agendaId?: string;
@@ -351,7 +351,7 @@ export const dfBookSlot = onCall(async (req) => {
   }
 });
 
-export const dfConfirmBooking = onCall(async (req) => {
+export const alConfirmBooking = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
   const { bookingId } = req.data as { bookingId?: string };
   if (!bookingId) throw new HttpsError("invalid-argument", "Falta bookingId");
@@ -359,7 +359,7 @@ export const dfConfirmBooking = onCall(async (req) => {
   return { ok: true };
 });
 
-export const dfCancelBooking = onCall(async (req) => {
+export const alCancelBooking = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
   const { bookingId } = req.data as { bookingId?: string };
   if (!bookingId) throw new HttpsError("invalid-argument", "Falta bookingId");
@@ -368,7 +368,7 @@ export const dfCancelBooking = onCall(async (req) => {
 });
 
 /** Frees expired holds (drafts nobody sent). Availability already ignores them; this tidies the data. */
-export const dfExpireHolds = onSchedule("every 60 minutes", async () => {
+export const alExpireHolds = onSchedule("every 60 minutes", async () => {
   const now = Date.now();
   const tenants = await db().collection(tenantsCol()).get();
   let n = 0;
