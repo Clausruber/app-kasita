@@ -4,9 +4,9 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   const name = process.env.NEXT_PUBLIC_APP_NAME || "Autolix";
   return {
-    name,
+    name: `${name} — La central de mando para lotes y agencias de autos`,
     short_name: name,
-    description: "Programa publicaciones y gestiona comentarios de tus redes sociales",
+    description: "Gestiona tus lotes y agencias de autos y conecta tus redes sociales y WhatsApp en un solo lugar.",
     start_url: "/dashboard",
     display: "standalone",
     background_color: "#ffffff",

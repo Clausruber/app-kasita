@@ -1,6 +1,7 @@
-# Social Planner (Firebase + Zernio)
+# Autolix — La central de mando para lotes y agencias de autos
 
-App para programar publicaciones en redes sociales e inbox de comentarios en tiempo real.
+Gestiona tus lotes y agencias de autos y conecta tus redes sociales y WhatsApp en un solo lugar.
+Construida con Firebase + Zernio.
 Inspirada en [LateWiz](https://github.com/zernio-dev/latewiz) (MIT).
 
 ```
