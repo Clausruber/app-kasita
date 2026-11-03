@@ -1,0 +1,251 @@
+rules_version = '2';
+service cloud.firestore {
+
+  match /databases/{database}/documents {
+    match /zitali-data/{document=**} {
+      allow read, write: if true;
+    }
+  }
+  match /databases/{database}/documents {
+    // Colección actual
+    match /zitali-data/{document=**} {
+      allow read, write: if true;
+    }
+    // Colecciones jerárquicas
+    match /empresas/{document=**} {
+      allow read, write: if true;
+    }
+    match /invitaciones_publicas/{document=**} {
+      allow read, write: if true;
+    }
+  }
+
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function role() { return signedIn() ? request.auth.token.get('role', '') : ''; }
+    function isStaff() { return role() in ['admin', 'vendedor']; }
+    function isAdmin() { return role() == 'admin'; }
+
+    match /users/{uid} {
+      allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
+      // Altas, roles y desactivación solo vía Cloud Functions (Admin SDK).
+      allow write: if false;
+    }
+
+    match /vehicles/{id} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+
+      match /expenses/{expenseId} {
+        allow read, create, update: if isStaff();
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /purchases/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /sales/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /clients/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /socialPosts/{id} {
+      allow read, create: if isStaff();
+      // El estado de publicación lo escribe la Function; el cliente solo edita borradores.
+      allow update: if isStaff() && resource.data.status == 'borrador'
+        && request.resource.data.status == 'borrador';
+      allow delete: if isAdmin() || (isStaff() && resource.data.status == 'borrador');
+    }
+
+    // Keys de integraciones: solo las Cloud Functions (Admin SDK) pueden leerlas o escribirlas.
+    match /private/{id} {
+      allow read, write: if false;
+    }
+
+    // Estado de la IA por conversación: lo escriben las Functions (webhook, pausar/reanudar).
+    
+    match /aiConversations/{id} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    // Cola de eventos y bitácora de la IA: solo Functions.
+    match /aiJobs/{id} {
+      allow read, write: if false;
+    }
+    match /aiLog/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /appointments/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+  }
+    match /databases/{database}/documents {
+    
+      // ===== Social Planner (DEMO-FIREBASE) =====
+      
+    function dfSignedIn() { return request.auth != null; }
+    function dfOnlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    match /DEMO-FIREBASE/_system/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /DEMO-FIREBASE/{uid} {
+      function dfIsOwner() { return dfSignedIn() && request.auth.uid == uid; }
+
+      allow read: if dfIsOwner();
+      allow update: if dfIsOwner() && dfOnlyChanges(['displayName', 'timezone']);
+
+      match /accounts/{accountId} {
+        allow read: if dfIsOwner();
+      }
+
+      match /posts/{postId} {
+        allow read: if dfIsOwner();
+        allow update: if dfIsOwner() && dfOnlyChanges(['unreadCount']);
+
+        match /messages/{messageId} {
+          allow read: if dfIsOwner();
+          allow update: if dfIsOwner() && dfOnlyChanges(['read']);
+        }
+      }
+
+       // Agendas y reservas: solo lectura para el dueño; se escriben desde la API/Functions.
+      match /agendas/{agendaId} {
+        allow read: if dfIsOwner();
+      }
+      match /agendas/{agendaId}/{document=**} {
+        allow read: if dfIsOwner();
+      }
+      match /bookings/{bookingId} {
+        allow read: if dfIsOwner();
+      }
+
+      match /conversations/{convId} {
+        allow read: if dfIsOwner();
+        allow update: if dfIsOwner() && dfOnlyChanges(['unreadCount']);
+
+        match /messages/{messageId} {
+          allow read: if dfIsOwner();
+          allow update: if dfIsOwner() && dfOnlyChanges(['read']);
+        }
+      }
+    
+
+      match /conversations/{convId} {
+        allow read: if dfIsOwner();
+        allow update: if dfIsOwner() && dfOnlyChanges(['unreadCount']);
+
+        match /messages/{messageId} {
+          allow read: if dfIsOwner();
+          allow update: if dfIsOwner() && dfOnlyChanges(['read']);
+        }
+      }
+    }
+
+    match /{path=**}/messages/{messageId} {
+      allow read: if dfSignedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.kind in ['comment', 'dm'];
+    }
+    // ===== fin Social Planner =====
+    }
+      // ===== Autolix (app-autolix-prod) =====
+  match /databases/{database}/documents {
+    function alSignedIn() { return request.auth != null; }
+    function alOnlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+    // Team member of workspace `ws`: the server-only index written when the invitation was accepted
+    // (rules can read it even though clients cannot). Inactive members lose access at once.
+    function alMemberOf(ws) {
+      let idx = /databases/$(database)/documents/app-autolix-prod/_system/members/$(request.auth.uid);
+      return exists(idx) && get(idx).data.ownerUid == ws && get(idx).data.status == 'active';
+    }
+
+    // Server-only routing indexes (Admin SDK bypasses rules).
+    match /app-autolix-prod/_system/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /app-autolix-prod/{uid} {
+      // Owner of the workspace, or an active member of its team.
+      function alIsOwner() { return alSignedIn() && (request.auth.uid == uid || alMemberOf(uid)); }
+
+      allow read: if alIsOwner();
+      allow update: if alSignedIn() && request.auth.uid == uid && alOnlyChanges(['displayName', 'timezone']);
+
+      match /accounts/{accountId} {
+        allow read: if alIsOwner();
+      }
+
+      match /posts/{postId} {
+        allow read: if alIsOwner();
+        // Clients may only clear unread counters; everything else goes through the API/functions.
+        allow update: if alIsOwner() && alOnlyChanges(['unreadCount']);
+
+        match /alMessages/{messageId} {
+          allow read: if alIsOwner();
+          allow update: if alIsOwner() && alOnlyChanges(['read']);
+        }
+      }
+
+      // Service agendas and bookings: read-only for the owner; writes go through the API/functions
+      // (bookings use a transaction on agendas/{id}/days/{date} so a slot is never given twice).
+      match /agendas/{agendaId}/{document=**} {
+        allow read: if alIsOwner();
+      }
+      match /agendas/{agendaId} {
+        allow read: if alIsOwner();
+      }
+      match /bookings/{bookingId} {
+        allow read: if alIsOwner();
+      }
+      // Follow-ups: read live for the sidebar badge; writes go through the API / scheduler.
+      // Inventory, deals and sales are only read through the API (VIN/plates and per-seller filtering).
+      match /tasks/{taskId} {
+        allow read: if alIsOwner();
+      }
+
+      match /conversations/{convId} {
+        allow read: if alIsOwner();
+        allow update: if alIsOwner() && alOnlyChanges(['unreadCount']);
+
+        match /alMessages/{messageId} {
+          allow read: if alIsOwner();
+          allow update: if alIsOwner() && alOnlyChanges(['read']);
+        }
+      }
+    }
+
+    // Unified inbox: collectionGroup('messages') where uid == workspace.
+    // `kind` limits it to this app's docs, so other apps' `messages` subcollections are not opened up.
+    match /{path=**}/alMessages/{messageId} {
+      allow read: if alSignedIn()
+        && resource.data.kind in ['comment', 'dm']
+        && (resource.data.uid == request.auth.uid || alMemberOf(resource.data.uid));
+    }
+  }
+  // ===== fin Autolix =====
+
+}

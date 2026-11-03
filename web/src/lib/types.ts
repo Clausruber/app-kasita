@@ -37,7 +37,7 @@ export type AiSettings = {
   keyHint: string | null;
 };
 
-export type DraftBooking = { id: string; service: string; label: string; start: number };
+export type DraftBooking = { id: string; service: string; label: string; start: number; vehicle?: string | null; lane?: string | null };
 export type ClientFieldName = "firstName" | "lastName" | "whatsapp" | "email";
 export type DraftClient = { platform: string; authorId: string; fields: Partial<Record<ClientFieldName, string>> };
 export type AiDraft = {
@@ -65,6 +65,9 @@ export type Agenda = {
   minNoticeMin: number;
   maxDaysAhead: number;
   active: boolean;
+  lanes?: number; // sub-spaces per time: 2 = A, B
+  vehicleRequired?: boolean; // test drives: each booking names the car
+  kind?: "test_drive";
 };
 
 export type BookingStatus = "held" | "confirmed" | "cancelled" | "expired";
@@ -80,9 +83,11 @@ export type Booking = {
   status: BookingStatus;
   holdExpiresAt: Timestamp | null;
   customer: { name: string; platform?: string | null; username?: string | null; contact?: string | null };
-  channel: { kind: "comment" | "dm" | "admin"; postId?: string; conversationId?: string };
+  channel: { kind: "comment" | "dm" | "admin" | "quote"; postId?: string; conversationId?: string; quoteId?: string };
   source: "ai" | "admin";
   notes: string;
+  lane?: string | null; // sub-space (A, B…) when the agenda has more than one
+  vehicle?: { id: string; title: string } | null;
 };
 
 export type Conversation = {
@@ -115,6 +120,7 @@ export type Message = {
   author: { name: string; username: string | null; picture: string | null };
   text: string;
   attachmentUrl?: string | null;
+  attachments?: { url: string; name: string; type: "file" | "image" }[]; // DMs sent from the app (catalog PDF)
   direction: "in" | "out";
   read: boolean;
   hidden?: boolean;
@@ -158,3 +164,83 @@ export type Client = {
   lastContactAt: string | null;
 };
 export type ClientBooking = { id: string; service: string; start: string; timezone: string; status: string };
+
+// ---- Inventory, sales pipeline and follow-ups (rows as the API returns them: dates are ISO strings) ----
+export type VehicleStatus = "borrador" | "disponible" | "apartado" | "vendido";
+export type VehiclePhoto = { path: string; url: string; w?: number; h?: number; size: number };
+export type VehicleReservation = { dealId: string; amount: number; at: string; expiresAt: string };
+export type Vehicle = {
+  id: string;
+  demo?: boolean; // test unit loaded from Inventario → Datos de prueba
+  status: VehicleStatus;
+  brand: string;
+  model: string;
+  year: number;
+  trim: string;
+  km: number;
+  price: number;
+  currency: "MXN";
+  condition: "nuevo" | "usado";
+  bodyType: string;
+  fuel: string;
+  transmission: string;
+  doors: number;
+  color: string;
+  engine: string; // displacement in litres, e.g. "2.0"
+  traction: string;
+  vin: string; // "" when the viewer lacks inventory.private
+  plates: string; // idem
+  singleOwner: boolean;
+  location: { state: string; city: string };
+  description: string;
+  features: string[];
+  title: string;
+  stockNumber: string;
+  photos: VehiclePhoto[]; // in display order; the cover is first
+  mlPermalink: string | null;
+  reservation: VehicleReservation | null;
+  hold: VehicleHold | null; // internal notice "Laura lo está mostrando hasta las 17:00" (blocks nothing)
+  intakeDate: string;
+  soldAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type DealStage = "nuevo" | "contactado" | "prueba" | "negociacion" | "apartado" | "vendido" | "perdido";
+export type Deal = {
+  id: string;
+  clientId: string | null;
+  clientName: string;
+  clientPhone: string;
+  vehicleId: string | null;
+  vehicleTitle: string | null;
+  stage: DealStage;
+  assigneeId: string | null; // member id; null = unassigned; "owner" = the account owner
+  source: "dm" | "comment" | "manual" | "ai";
+  value: number | null;
+  notes: string;
+  lostReason: string;
+  reservation: VehicleReservation | null;
+  saleId: string | null;
+  stageChangedAt: string | null;
+  createdAt: string | null;
+};
+export type PaymentMethod = "contado" | "credito" | "financiera";
+
+export type TaskKind = "manual" | "stale_lead" | "reservation_expiry" | "quote_viewed" | "quote_accepted" | "quote_booking" | "hold_expiry";
+export type VehicleHold = { byId: string; byName: string; until: string; note: string };
+export type Task = {
+  id: string;
+  title: string;
+  notes: string;
+  dueAt: string;
+  done: boolean;
+  doneAt: string | null;
+  assigneeId: string | null;
+  clientId: string | null;
+  dealId: string | null;
+  vehicleId: string | null;
+  conversationId: string | null;
+  kind: TaskKind;
+  createdAt: string | null;
+};

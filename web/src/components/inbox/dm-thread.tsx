@@ -104,6 +104,18 @@ export function DmThread({ conversation, messages }: { conversation: Conversatio
                   )}
                 >
                   {m.text}
+                  {m.attachments?.map((a) => (
+                    <a
+                      key={a.url}
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cn("mt-1 flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs", mine ? "bg-primary-foreground/15" : "bg-background")}
+                    >
+                      <span className="font-bold">{a.type === "file" ? "PDF" : "IMG"}</span>
+                      <span className="truncate">{a.name}</span>
+                    </a>
+                  ))}
                 </div>
                 <div className={cn("flex items-center gap-2 px-1 text-[11px] text-muted-foreground", mine && "justify-end")}>
                   {mine && m.booking && <BookingChip booking={m.booking} />}
@@ -126,10 +138,19 @@ export function DmThread({ conversation, messages }: { conversation: Conversatio
           latest={latest}
           placeholder={`Responder a ${name}…`}
           canAttach={false}
-          attachHint="Los anexos no están disponibles en mensajes directos"
+          attachHint="En mensajes directos usa «Catálogo» para enviar una cotización"
+          catalog={{ conversationId: conversation.id, clientName: conversation.participant?.name ?? "" }}
           onSuggest={async (note) => (await suggestFn({ conversationId: conversation.id, messageId: latest.id, note })).data.reply}
-          onSend={async ({ text, booking, saveClient }) => {
-            await replyFn({ conversationId: conversation.id, messageId: latest.id, requestId: crypto.randomUUID(), text, booking, saveClient });
+          onSend={async ({ text, booking, saveClient, attachmentUrl, attachmentName, attachmentType }) => {
+            await replyFn({
+              conversationId: conversation.id,
+              messageId: latest.id,
+              requestId: crypto.randomUUID(),
+              text,
+              booking,
+              saveClient,
+              ...(attachmentUrl ? { attachmentUrl, attachmentName, attachmentType } : {}),
+            });
           }}
         />
       ) : (

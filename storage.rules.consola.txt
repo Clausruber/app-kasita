@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Permitir subida y lectura de imágenes para publicaciones en redes sociales
+    match /social_posts/{allPaths=**} {
+      allow read, write: if true;
+    }
+
+    // ===== Autolix (app-autolix-prod): fotos de autos =====
+    // Lee y sube el dueño de la cuenta o un miembro activo de su equipo; solo imágenes de menos de 10 MB.
+    // Los borrados los hace la API con el SDK de admin.
+    match /app-autolix-prod/{uid}/vehicles/{vehicleId}/{file} {
+      function alOwner() {
+        return request.auth != null && (
+          request.auth.uid == uid ||
+          (firestore.exists(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)) &&
+           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.ownerUid == uid &&
+           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.status == 'active'));
+      }
+      allow read: if alOwner();
+      allow create: if alOwner()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow update, delete: if false;
+    }
+    // ===== fin Autolix =====
+
+    // Regla general para el resto del almacenamiento
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

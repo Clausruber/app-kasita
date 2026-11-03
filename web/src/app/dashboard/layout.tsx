@@ -1,27 +1,33 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { CalendarCheck, CalendarDays, Clock, Inbox, Lock, LogOut, Newspaper, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { BellRing, CalendarCheck, CalendarDays, Car, Clock, FileText, Inbox, KanbanSquare, Lock, LogOut, Newspaper, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useInbox } from "@/hooks/use-firestore";
 import { useMe } from "@/hooks/use-me";
+import { useTaskBadge } from "@/hooks/use-tasks";
 import { can } from "@/lib/permissions";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 // `perm`: access key a team member needs (lib/permissions.ts). Ajustes always opens (Perfil is for everyone).
+// `group`: a line separates groups in the sidebar (lot · selling · settings).
 const NAV = [
-  { href: "/dashboard/inbox", label: "Inbox", icon: Inbox, perm: "inbox" },
-  { href: "/dashboard/posts", label: "Publicaciones", icon: Newspaper, perm: "posts" },
-  { href: "/dashboard/clients", label: "Clientes", icon: UserRound, perm: "clients" },
-  { href: "/dashboard/calendar", label: "Calendario", icon: CalendarDays, perm: "calendar" },
-  { href: "/dashboard/agenda", label: "Agenda", icon: CalendarCheck, perm: "agenda" },
-  { href: "/dashboard/settings", label: "Ajustes", icon: Settings, perm: null },
+  { href: "/dashboard/inventory", label: "Inventario", icon: Car, perm: "inventory", group: 1 },
+  { href: "/dashboard/clients", label: "Clientes", icon: UserRound, perm: "clients", group: 1 },
+  { href: "/dashboard/calendar", label: "Calendario", icon: CalendarDays, perm: "calendar", group: 1 },
+  { href: "/dashboard/agenda", label: "Agenda", icon: CalendarCheck, perm: "agenda", group: 1 },
+  { href: "/dashboard/posts", label: "Publicaciones", icon: Newspaper, perm: "posts", group: 1 },
+  { href: "/dashboard/inbox", label: "Inbox", icon: Inbox, perm: "inbox", group: 2 },
+  { href: "/dashboard/quotes", label: "Cotizaciones", icon: FileText, perm: "inventory", group: 2 },
+  { href: "/dashboard/tasks", label: "Seguimientos", icon: BellRing, perm: "tasks", group: 2 },
+  { href: "/dashboard/pipeline", label: "Pipeline", icon: KanbanSquare, perm: "deals", group: 2 },
+  { href: "/dashboard/settings", label: "Ajustes", icon: Settings, perm: null, group: 3 },
 ];
 
 function NoAccess() {
@@ -62,6 +68,12 @@ function PendingAccount({ email, disabled, member }: { email: string | null; dis
   );
 }
 
+function TaskBadge() {
+  const due = useTaskBadge();
+  if (!due) return null;
+  return <span className="ml-auto rounded-full bg-destructive px-1.5 text-xs text-white">{due > 99 ? "99+" : due}</span>;
+}
+
 function UnreadBadge() {
   const { data } = useInbox();
   const unread = data.filter((m) => m.direction === "in" && !m.read).length;
@@ -92,7 +104,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     return <PendingAccount email={user.email} disabled={me.data.status === "disabled"} member={me.data.role === "member"} />;
   }
   const allowed = NAV.filter((n) => !n.perm || can(me.data?.perms, n.perm));
-  const nav = superadmin ? [...allowed, { href: "/dashboard/superadmin", label: "SuperAdmin", icon: ShieldCheck, perm: null }] : allowed;
+  const nav = superadmin ? [...allowed, { href: "/dashboard/superadmin", label: "SuperAdmin", icon: ShieldCheck, perm: null, group: 3 }] : allowed;
   const current = NAV.find((n) => pathname.startsWith(n.href));
   const blocked = !!current && !allowed.includes(current);
 
@@ -105,19 +117,23 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <BrandLogo className="h-[43px] max-w-full" />
         </div>
         <nav className="flex gap-1 overflow-x-auto md:flex-col">
-          {nav.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap hover:bg-muted",
-                pathname.startsWith(href) && "bg-muted font-medium",
-              )}
-            >
-              <Icon className="size-4" />
-              {label}
-              {href === "/dashboard/inbox" && <UnreadBadge />}
-            </Link>
+          {nav.map(({ href, label, icon: Icon, group }, i) => (
+            <Fragment key={href}>
+              {/* Separator between groups: horizontal line in the sidebar, vertical in the mobile top bar. */}
+              {i > 0 && nav[i - 1].group !== group && <span aria-hidden className="mx-1 w-px shrink-0 self-stretch bg-border md:mx-2 md:my-1.5 md:h-px md:w-auto" />}
+              <Link
+                href={href}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap hover:bg-muted",
+                  pathname.startsWith(href) && "bg-muted font-medium",
+                )}
+              >
+                <Icon className="size-4" />
+                {label}
+                {href === "/dashboard/inbox" && <UnreadBadge />}
+                {href === "/dashboard/tasks" && <TaskBadge />}
+              </Link>
+            </Fragment>
           ))}
         </nav>
         <div className="mt-auto hidden pt-4 md:block">

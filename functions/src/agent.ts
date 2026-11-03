@@ -32,11 +32,12 @@ import {
   releaseHold,
   reserveSlot,
 } from "./agenda";
+import { bookingVehicle, hasInventory, inventorySection, searchInventory } from "./inventory";
 
 const OPENROUTER_URL = process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1";
 const MAX_AGE_MS = 24 * 3600_000; // older comments never trigger the agent
 const MAX_THREAD = 30;
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = 5; // e.g. search inventory + check availability + book
 
 const db = () => getFirestore();
 
@@ -54,7 +55,7 @@ type AiSettings = {
   companyTimezone?: string;
 };
 type Msg = FirebaseFirestore.DocumentData & { id: string };
-type DraftBooking = { id: string; service: string; label: string; start: number };
+type DraftBooking = { id: string; service: string; label: string; start: number; vehicle?: string | null; lane?: string | null };
 export type AgentResult = {
   reply: string;
   needsHuman: boolean;
@@ -62,8 +63,11 @@ export type AgentResult = {
   model: string;
   booking: DraftBooking | null;
   client: ClientProposal | null; // data the person gave, saved to the client card when the reply is sent
+  trace?: ToolTrace[]; // only in test runs
 };
-type RunState = { booking: DraftBooking | null; client: ClientProposal | null };
+type ToolTrace = { tool: string; args: unknown; result: unknown };
+// dryRun: test chat from Ajustes → nothing is booked, cancelled or saved.
+type RunState = { booking: DraftBooking | null; client: ClientProposal | null; dryRun: boolean; trace: ToolTrace[] };
 
 const authorKey = (m: FirebaseFirestore.DocumentData) => m.author?.username || m.author?.name || "?";
 
@@ -85,8 +89,20 @@ async function loadSettings(uid: string) {
     companyTimezone: (user.get("company.timezone") as string | undefined) ?? undefined,
   };
   const enc = global.get("openrouterKey") as string | undefined;
-  return { ai, apiKey: enc ? decrypt(enc) : null, active: tenant.get("status") === "active" };
+  let apiKey: string | null = null;
+  let keyUnreadable = false;
+  try {
+    apiKey = enc ? decrypt(enc) : null;
+  } catch (err) {
+    // Saved with a different DF_AI_ENCRYPTION_KEY than the functions secret.
+    keyUnreadable = true;
+    logger.error("openrouter key cannot be decrypted", { err: String(err) });
+  }
+  return { ai, apiKey, keyUnreadable, active: tenant.get("status") === "active" };
 }
+
+const KEY_UNREADABLE = "No se pudo leer la API key de OpenRouter: el SuperAdmin debe volver a guardarla en el panel de SuperAdmin.";
+const NO_AI = "El administrador aún no ha configurado la IA (API key de OpenRouter y modelo)";
 
 type Context = {
   channel: Channel;
@@ -159,7 +175,8 @@ function agendaSection(agendas: Agenda[], existing: FirebaseFirestore.DocumentDa
     `Hoy es ${weekday} ${now.date}, son las ${now.time} (zona ${tz}).`,
     "Servicios que se pueden reservar:",
     ...agendas.map(
-      (a) => `- agendaId="${a.id}" · ${a.service} · ${a.durationMin} min${a.price ? ` · ${a.price}` : ""}${a.description ? ` · ${a.description}` : ""}`,
+      (a) =>
+        `- agendaId="${a.id}" · ${a.service} · ${a.durationMin} min${a.price ? ` · ${a.price}` : ""}${a.description ? ` · ${a.description}` : ""}${a.vehicleRequired ? " · REQUIERE AUTO (vehicleId)" : ""}`,
     ),
     existing.length
       ? `Citas próximas de esta persona: ${existing.map((b) => `bookingId="${b.id}" ${b.service} ${formatSlot((b.start as Timestamp).toMillis(), b.timezone ?? tz)} (${b.status === "held" ? "pendiente de confirmar" : "confirmada"})`).join("; ")}`
@@ -170,6 +187,12 @@ function agendaSection(agendas: Agenda[], existing: FirebaseFirestore.DocumentDa
     "- Llama a book_appointment SOLO cuando la persona confirme explícitamente un horario concreto que le ofreciste. Después confirma en la respuesta el servicio, el día y la hora.",
     "- Al confirmar una cita, si la ficha no tiene nombre y apellidos o WhatsApp, pídelos (el WhatsApp solo por mensaje directo).",
     "- Si book_appointment devuelve slot_taken, dilo y ofrece las alternativas que devuelve.",
+    ...(agendas.some((a) => a.vehicleRequired)
+      ? [
+          "- Pruebas de manejo (agendas que REQUIEREN AUTO): antes de ver horarios confirma qué auto quiere probar. Obtén su vehicleId con search_inventory (nunca lo inventes) y pásalo a check_availability y a book_appointment. Si no sabe cuál, ayúdale a elegir con search_inventory.",
+          "- Al confirmar la prueba de manejo menciona el auto, el día y la hora.",
+        ]
+      : []),
     "- Para cancelar una cita de esta persona usa cancel_appointment con su bookingId.",
     "- Las fechas que pasas a las herramientas van en formato YYYY-MM-DD y las horas HH:mm (hora local de la agenda).",
   ];
@@ -282,7 +305,11 @@ const AGENDA_TOOLS = [
       description: "Horarios libres reales de un servicio para una fecha.",
       parameters: {
         type: "object",
-        properties: { agendaId: { type: "string" }, date: { type: "string", description: "YYYY-MM-DD" } },
+        properties: {
+          agendaId: { type: "string" },
+          date: { type: "string", description: "YYYY-MM-DD" },
+          vehicleId: { type: "string", description: "Auto de la prueba de manejo (de search_inventory): oculta horarios en que ese auto ya está ocupado" },
+        },
         required: ["agendaId", "date"],
       },
     },
@@ -299,6 +326,7 @@ const AGENDA_TOOLS = [
           date: { type: "string", description: "YYYY-MM-DD" },
           time: { type: "string", description: "HH:mm" },
           customerName: { type: "string" },
+          vehicleId: { type: "string", description: "Obligatorio en agendas que REQUIEREN AUTO: vehicleId de search_inventory" },
         },
         required: ["agendaId", "date", "time"],
       },
@@ -313,6 +341,32 @@ const AGENDA_TOOLS = [
     },
   },
 ];
+
+const INVENTORY_TOOL = {
+  type: "function",
+  function: {
+    name: "search_inventory",
+    description: "Busca autos DISPONIBLES en el inventario real del lote. Úsala antes de mencionar cualquier auto o precio.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Texto libre solo con marca, modelo, versión o color (p. ej. 'jetta rojo'). No pongas precios ni palabras como 'auto'." },
+        brand: { type: "string" },
+        model: { type: "string" },
+        yearMin: { type: "number" },
+        yearMax: { type: "number" },
+        price: { type: "number", description: "Presupuesto aproximado en MXN ('un auto de 205 mil' → 205000): devuelve los más cercanos a ese precio" },
+        priceMin: { type: "number", description: "Precio mínimo en MXN ('desde 200 mil')" },
+        priceMax: { type: "number", description: "Precio máximo en MXN ('hasta 300 mil', 'menos de 300 mil')" },
+        kmMax: { type: "number", description: "Kilometraje máximo ('menos de 50 mil km' → 50000)" },
+        bodyType: { type: "string", description: "Sedán, SUV, Pick-Up, Hatchback, Minivan, Coupé, Convertible…" },
+        transmission: { type: "string", description: "Automática, Manual o CVT" },
+        fuel: { type: "string", description: "Gasolina, Diésel, Híbrido o Eléctrico" },
+        condition: { type: "string", description: "nuevo o usado" },
+      },
+    },
+  },
+};
 
 type ToolCall = { id: string; function: { name: string; arguments: string } };
 
@@ -349,12 +403,36 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
     case "check_availability": {
       if (!agenda) return { error: "agendaId desconocido", agendas: agendas.map((a) => ({ agendaId: a.id, service: a.service })) };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date ?? "")) return { error: "date debe ser YYYY-MM-DD" };
-      const slots = await getSlots(uid, agenda, args.date);
-      return { agendaId: agenda.id, service: agenda.service, date: args.date, timezone: agenda.timezone, free: slots.map((s) => s.time), note: slots.length ? null : "No hay horarios libres ese día (cerrado, bloqueado, pasado o completo)." };
+      const slots = await getSlots(uid, agenda, args.date, Date.now(), args.vehicleId || null);
+      return {
+        agendaId: agenda.id,
+        service: agenda.service,
+        date: args.date,
+        timezone: agenda.timezone,
+        free: slots.map((s) => s.time),
+        note: slots.length ? null : "No hay horarios libres ese día (cerrado, bloqueado, pasado o completo).",
+        ...(agenda.vehicleRequired && !args.vehicleId ? { reminder: "Esta agenda requiere auto: confirma el vehicleId antes de reservar." } : {}),
+      };
     }
     case "book_appointment": {
       if (!agenda) return { error: "agendaId desconocido" };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date ?? "") || !/^\d{2}:\d{2}$/.test(args.time ?? "")) return { error: "date YYYY-MM-DD y time HH:mm" };
+      let vehicle: { id: string; title: string } | null = null;
+      if (agenda.vehicleRequired || args.vehicleId) {
+        if (!args.vehicleId) return { error: "vehicle_required", note: "Pregunta qué auto quiere probar y obtén su vehicleId con search_inventory." };
+        const v = await bookingVehicle(uid, args.vehicleId);
+        if ("error" in v) return { error: v.error };
+        vehicle = v;
+      }
+      if (state.dryRun) {
+        const slots = await getSlots(uid, agenda, args.date, Date.now(), vehicle?.id);
+        const slot = slots.find((s) => s.time === args.time);
+        if (!slot) return { error: "slot_taken", alternatives: slots.slice(0, 5).map((s) => `${s.date} ${s.time}`) };
+        const label = formatSlot(slot.start, agenda.timezone);
+        const lane = agenda.lanes > 1 ? slot.lanes[0] : null;
+        state.booking = { id: "simulada", service: agenda.service, label, start: slot.start, vehicle: vehicle?.title ?? null, lane };
+        return { ok: true, bookingId: "simulada", service: agenda.service, when: label, vehicle: vehicle?.title ?? null, space: lane };
+      }
       // One booking per reply: a new one replaces the hold proposed earlier in this same run.
       if (state.booking) await releaseHold(uid, state.booking.id).catch(() => {});
       try {
@@ -371,15 +449,19 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
           },
           channel: ctx.channel,
           source: "ai",
+          vehicle,
         });
-        state.booking = { id: b.id, service: b.service, label: b.label, start: b.start };
-        return { ok: true, bookingId: b.id, service: b.service, when: b.label };
+        state.booking = { id: b.id, service: b.service, label: b.label, start: b.start, vehicle: b.vehicle?.title ?? null, lane: b.lane };
+        return { ok: true, bookingId: b.id, service: b.service, when: b.label, vehicle: b.vehicle?.title ?? null, space: b.lane };
       } catch (e) {
         if (e instanceof SlotTakenError) return { error: "slot_taken", alternatives: e.alternatives.map((s) => `${s.date} ${s.time}`) };
         throw e;
       }
     }
+    case "search_inventory":
+      return searchInventory(uid, args);
     case "cancel_appointment": {
+      if (state.dryRun) return { ok: true, simulated: true };
       const mine = await customerBookings(uid, String(ctx.customer.authorId));
       if (!mine.some((b) => b.id === args.bookingId)) return { error: "Esa cita no es de esta persona o ya no está activa" };
       await cancelBooking(uid, args.bookingId);
@@ -408,20 +490,21 @@ async function chat(apiKey: string, body: object) {
   return json.choices?.[0]?.message ?? {};
 }
 
-async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettings, ctx: Context, note?: string): Promise<AgentResult> {
-  if (ctx.customer.authorId && ctx.platform) {
+async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettings, ctx: Context, note?: string, dryRun = false): Promise<AgentResult> {
+  if (!dryRun && ctx.customer.authorId && ctx.platform) {
     ctx.profile = await getClientProfile(uid, ctx.platform, String(ctx.customer.authorId));
     // Bookings carry the client's real name when the owner saved it.
     if (ctx.profile?.fullName) ctx.customer = { ...ctx.customer, name: ctx.profile.fullName, contact: ctx.profile.whatsapp ?? ctx.customer.contact ?? null };
   }
   const agendas = await listAgendas(uid);
-  const existing = agendas.length && ctx.customer.authorId ? await customerBookings(uid, String(ctx.customer.authorId)) : [];
+  const existing = !dryRun && agendas.length && ctx.customer.authorId ? await customerBookings(uid, String(ctx.customer.authorId)) : [];
+  const [inventory, stock] = await Promise.all([inventorySection(uid), hasInventory(uid)]);
   const messages: object[] = [
-    { role: "system", content: systemPrompt(ai, agendaSection(agendas, existing), ctx.channel.kind === "comment") },
+    { role: "system", content: systemPrompt(ai, [...agendaSection(agendas, existing), ...inventory], ctx.channel.kind === "comment") },
     { role: "user", content: userPrompt(ctx, note) },
   ];
-  const state: RunState = { booking: null, client: null };
-  const tools = [CLIENT_TOOL, ...(agendas.length ? AGENDA_TOOLS : [])];
+  const state: RunState = { booking: null, client: null, dryRun, trace: [] };
+  const tools = [CLIENT_TOOL, ...(stock ? [INVENTORY_TOOL] : []), ...(agendas.length ? AGENDA_TOOLS : [])];
   let content = "";
 
   for (let round = 0; ; round++) {
@@ -441,6 +524,7 @@ async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettin
     messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
     for (const call of msg.tool_calls) {
       const out = await runTool(uid, ctx, agendas, state, call);
+      if (dryRun) state.trace.push({ tool: call.function.name, args: parseArgs(call.function.arguments), result: out });
       messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(out) });
     }
   }
@@ -450,7 +534,7 @@ async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettin
     out = parseJson(content);
   } catch {
     // Model ignored the JSON format: use the text, but have a human check it.
-    return { reply: content.trim(), needsHuman: true, reason: "La IA no devolvió el formato esperado", model, booking: state.booking, client: state.client };
+    return { reply: content.trim(), needsHuman: true, reason: "La IA no devolvió el formato esperado", model, booking: state.booking, client: state.client, ...(dryRun ? { trace: state.trace } : {}) };
   }
   const reply = (out.reply ?? "").trim();
   return {
@@ -460,7 +544,16 @@ async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettin
     model,
     booking: state.booking,
     client: state.client,
+    ...(dryRun ? { trace: state.trace } : {}),
   };
+}
+
+function parseArgs(raw?: string) {
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    return raw ?? null;
+  }
 }
 
 const draftOf = (r: AgentResult) => ({
@@ -539,8 +632,9 @@ export const alSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async 
   const { postId, conversationId, messageId, note } = req.data as { postId?: string; conversationId?: string; messageId?: string; note?: string };
   if ((!postId && !conversationId) || !messageId) throw new HttpsError("invalid-argument", "Faltan postId/conversationId o messageId");
 
-  const { ai, apiKey } = await loadSettings(uid);
-  if (!apiKey || !ai.textModel) throw new HttpsError("failed-precondition", "El administrador aún no ha configurado la IA (API key de OpenRouter y modelo)");
+  const { ai, apiKey, keyUnreadable } = await loadSettings(uid);
+  if (keyUnreadable) throw new HttpsError("failed-precondition", KEY_UNREADABLE);
+  if (!apiKey || !ai.textModel) throw new HttpsError("failed-precondition", NO_AI);
 
   try {
     const ref = postId
@@ -558,3 +652,39 @@ export const alSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async 
   }
 });
 
+
+const TEST_MAX_MESSAGES = 30;
+const TEST_MAX_CHARS = 1000;
+
+/** Test chat in Ajustes → Agente IA: same prompt and tools, but nothing is sent, booked or saved. */
+export const alTestAgent = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+  const uid = await workspaceOf(req, "settings.agente");
+  const { channel, postText, messages } = (req.data ?? {}) as { channel?: string; postText?: string; messages?: { from?: string; text?: string }[] };
+  const thread = (Array.isArray(messages) ? messages : [])
+    .slice(-TEST_MAX_MESSAGES)
+    .map((m) => ({ from: m?.from === "marca" ? "marca" : "cliente", text: String(m?.text ?? "").slice(0, TEST_MAX_CHARS).trim() }))
+    .filter((m) => m.text);
+  const last = thread[thread.length - 1];
+  if (!last || last.from !== "cliente") throw new HttpsError("invalid-argument", "El último mensaje debe ser del cliente");
+
+  const { ai, apiKey, keyUnreadable } = await loadSettings(uid);
+  if (keyUnreadable) throw new HttpsError("failed-precondition", KEY_UNREADABLE);
+  if (!apiKey || !ai.textModel) throw new HttpsError("failed-precondition", NO_AI);
+
+  const isComment = channel === "comment";
+  const authorName = "Cliente de prueba";
+  const ctx: Context = {
+    channel: isComment ? { kind: "comment", postId: "prueba", messageId: "prueba" } : { kind: "dm", conversationId: "prueba", messageId: "prueba" },
+    platform: "prueba",
+    postText: isComment ? String(postText ?? "").slice(0, 2000).trim() || "(post sin texto)" : null,
+    authorName,
+    customer: { name: authorName, platform: "prueba", authorId: "test", username: null },
+    target: { id: "prueba", text: last.text, direction: "in" },
+    lines: thread.map((m) => line(m.from === "cliente" ? authorName : "Marca", m)),
+  };
+  try {
+    return await runAgent(uid, apiKey, ai.textModel, ai, ctx, undefined, true);
+  } catch (err) {
+    throw new HttpsError("internal", (err as Error).message);
+  }
+});

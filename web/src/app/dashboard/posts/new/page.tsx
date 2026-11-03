@@ -4,10 +4,14 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, ImagePlus, Send, CalendarClock, X } from "lucide-react";
+import { ArrowLeft, ImagePlus, Send, CalendarClock, Stamp, X } from "lucide-react";
 import { api, uploadMedia } from "@/lib/api";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useComposeStore } from "@/stores/compose-store";
+import { usePostImages } from "@/hooks/use-post-images";
+import { PostPreview } from "@/components/posts/post-preview";
+import { WatermarkedImage } from "@/components/shared/watermarked-image";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PlatformBadge } from "@/components/shared/platform-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,6 +31,14 @@ export default function NewPostPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
   const [sending, setSending] = useState(false);
+  const images = usePostImages();
+  const hasLogo = !!images.data?.logoUrl;
+  // The toggle starts at the default from Ajustes → Imágenes until the user flips it.
+  const withLogo = hasLogo && (s.watermark ?? images.data?.defaultOn ?? false);
+  const logo = withLogo ? images.data! : null;
+  const isGif = (url: string) => /\.gif(\?|$)/i.test(url);
+  const hasStills = s.mediaItems.some((m) => (m.type ?? "image") === "image" && !isGif(m.url));
+  const hasMoving = s.mediaItems.some((m) => m.type === "video" || m.type === "gif" || isGif(m.url));
 
   async function onFiles(files: FileList | null) {
     for (const file of Array.from(files ?? [])) {
@@ -51,6 +63,7 @@ export default function NewPostPage() {
           content: s.content,
           accountIds: s.accountIds,
           mediaItems: s.mediaItems.map(({ url, type }) => ({ url, type })),
+          watermark: withLogo && hasStills,
           publishNow,
           // datetime-local has no offset; convert from the browser's local time.
           scheduledFor: publishNow ? null : new Date(s.scheduledFor).toISOString(),
@@ -131,12 +144,11 @@ export default function NewPostPage() {
           <div className="space-y-2">
             <div className="flex flex-wrap gap-2">
               {s.mediaItems.map((m) => (
-                <div key={m.url} className="relative size-24 overflow-hidden rounded-lg border bg-muted">
+                <div key={m.url} className="relative flex size-24 items-center overflow-hidden rounded-lg border bg-muted">
                   {m.type === "video" ? (
                     <video src={m.url} className="size-full object-cover" muted />
                   ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={m.url} alt={m.name ?? ""} className="size-full object-cover" />
+                    <WatermarkedImage src={m.url} alt={m.name ?? ""} logo={m.type === "gif" ? null : logo} className="w-full" />
                   )}
                   <button
                     type="button"
@@ -160,9 +172,21 @@ export default function NewPostPage() {
                 e.target.value = "";
               }}
             />
-            <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
-              <ImagePlus /> {uploading ? `Subiendo (${uploading})…` : "Añadir imagen o video"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
+                <ImagePlus /> {uploading ? `Subiendo (${uploading})…` : "Añadir imagen o video"}
+              </Button>
+              <label className={cn("flex items-center gap-2 text-sm", !hasLogo && "text-muted-foreground")}>
+                <Checkbox checked={withLogo} disabled={!hasLogo} onCheckedChange={(c) => s.setWatermark(c === true)} />
+                <Stamp className="size-4" /> Agregar logo
+              </label>
+              {!images.isLoading && !hasLogo && (
+                <Link href="/dashboard/settings#imagenes" className="text-xs text-primary hover:underline">
+                  Configura tu logo en Ajustes → Imágenes
+                </Link>
+              )}
+            </div>
+            {withLogo && hasMoving && <p className="text-xs text-muted-foreground">Los videos y GIF se publican sin logo.</p>}
           </div>
 
           <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-end">
@@ -184,6 +208,18 @@ export default function NewPostPage() {
               </Button>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-3">
+          <Label>Vista previa</Label>
+          <PostPreview
+            accounts={activeAccounts.filter((a) => s.accountIds.includes(a._id))}
+            content={s.content}
+            media={s.mediaItems}
+            logo={logo}
+          />
         </CardContent>
       </Card>
     </div>

@@ -25,6 +25,27 @@ export const PERMISSIONS: PermNode[] = [
   },
   { key: "posts", label: "Publicaciones", children: [{ key: "posts.create", label: "Nueva publicación" }, { key: "posts.delete", label: "Borrar publicaciones" }] },
   { key: "clients", label: "Clientes", children: [{ key: "clients.edit", label: "Editar fichas" }] },
+  {
+    key: "inventory",
+    label: "Inventario",
+    children: [
+      { key: "inventory.edit", label: "Alta y edición de autos" },
+      { key: "inventory.delete", label: "Borrar autos" },
+      { key: "inventory.private", label: "Ver VIN y placas" },
+    ],
+  },
+  {
+    key: "deals",
+    label: "Pipeline (ventas)",
+    children: [
+      { key: "deals.edit", label: "Crear y mover oportunidades" },
+      { key: "deals.assignAll", label: "Ver y reasignar las de todo el equipo" },
+      { key: "deals.reserve", label: "Registrar apartados" },
+      { key: "deals.sell", label: "Registrar ventas" },
+      { key: "deals.void", label: "Liberar apartados" },
+    ],
+  },
+  { key: "tasks", label: "Seguimientos", children: [{ key: "tasks.all", label: "Ver los de todo el equipo" }] },
   { key: "calendar", label: "Calendario" },
   { key: "agenda", label: "Agenda", children: [{ key: "agenda.book", label: "Agendar, confirmar y cancelar citas" }] },
   {
@@ -36,14 +57,22 @@ export const PERMISSIONS: PermNode[] = [
       { key: "settings.redes", label: "Redes" },
       { key: "settings.agendas", label: "Agendas" },
       { key: "settings.agente", label: "Agente IA" },
+      { key: "settings.imagenes", label: "Imágenes (logo en los posts)" },
     ],
   },
 ];
 
 export const ALL_PERMS = PERMISSIONS.flatMap((n) => [n.key, ...(n.children ?? []).map((c) => c.key)]);
 
-const TEAM: string[] = ["inbox", "inbox.comments", "inbox.dms", "inbox.reply", "posts", "clients", "clients.edit", "calendar", "agenda", "agenda.book"];
-const SUPERVISOR: string[] = [...TEAM, "inbox.agentMode", "posts.create", "posts.delete", "settings", "settings.empresa", "settings.redes", "settings.agendas", "settings.agente"];
+const TEAM: string[] = [
+  ...["inbox", "inbox.comments", "inbox.dms", "inbox.reply", "posts", "clients", "clients.edit", "calendar", "agenda", "agenda.book"],
+  ...["inventory", "deals", "deals.edit", "deals.reserve", "tasks"],
+];
+const SUPERVISOR: string[] = [
+  ...TEAM,
+  ...["inbox.agentMode", "posts.create", "posts.delete", "settings", "settings.empresa", "settings.redes", "settings.agendas", "settings.agente", "settings.imagenes"],
+  ...["inventory.edit", "inventory.delete", "inventory.private", "deals.assignAll", "deals.sell", "deals.void", "tasks.all"],
+];
 
 /** Default access of each role; the admin can then tick/untick items per person. */
 export const ROLE_PRESETS: Record<TeamRole, string[]> = { team: TEAM, supervisor: SUPERVISOR, admin: ALL_PERMS };

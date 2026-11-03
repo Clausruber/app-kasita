@@ -8,16 +8,16 @@ service cloud.firestore {
     // Team member of workspace `ws`: the server-only index written when the invitation was accepted
     // (rules can read it even though clients cannot). Inactive members lose access at once.
     function alMemberOf(ws) {
-      let idx = /databases/$(database)/documents/app-autolix/_system/members/$(request.auth.uid);
+      let idx = /databases/$(database)/documents/app-autolix-prod/_system/members/$(request.auth.uid);
       return exists(idx) && get(idx).data.ownerUid == ws && get(idx).data.status == 'active';
     }
 
     // Server-only routing indexes (Admin SDK bypasses rules).
-    match /app-autolix/_system/{document=**} {
+    match /app-autolix-prod/_system/{document=**} {
       allow read, write: if false;
     }
 
-    match /app-autolix/{uid} {
+    match /app-autolix-prod/{uid} {
       // Owner of the workspace, or an active member of its team.
       function alIsOwner() { return alSignedIn() && (request.auth.uid == uid || alMemberOf(uid)); }
 
@@ -48,6 +48,11 @@ service cloud.firestore {
         allow read: if alIsOwner();
       }
       match /bookings/{bookingId} {
+        allow read: if alIsOwner();
+      }
+      // Follow-ups: read live for the sidebar badge; writes go through the API / scheduler.
+      // Inventory, deals and sales are only read through the API (VIN/plates and per-seller filtering).
+      match /tasks/{taskId} {
         allow read: if alIsOwner();
       }
 

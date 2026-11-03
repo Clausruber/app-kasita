@@ -13,7 +13,7 @@ import { BookingModal } from "@/components/agenda/booking-modal";
 import { cn } from "@/lib/utils";
 import { useCan } from "@/hooks/use-me";
 
-type Slot = { start: number; time: string; label: string };
+type Slot = { start: number; time: string; label: string; lanes: string[] };
 const getSlotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "alGetSlots");
 export const confirmBookingFn = httpsCallable<{ bookingId: string }>(functions, "alConfirmBooking");
 export const cancelBookingFn = httpsCallable<{ bookingId: string }>(functions, "alCancelBooking");
@@ -106,7 +106,9 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
                   onClick={() => setBooking(r.slot)}
                 >
                   <span className="w-12 font-mono">{r.time}</span>
-                  <span className="text-muted-foreground">Libre · reservar</span>
+                  <span className="text-muted-foreground">
+                    Libre{(agenda.lanes ?? 1) > 1 ? ` (${(r.slot.lanes ?? []).join(", ")})` : ""} · reservar
+                  </span>
                 </button>
               </li>
             ) : (
@@ -117,12 +119,16 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
                   r.booking.status === "held" ? "border-amber-500/50 bg-amber-500/10" : "bg-muted/50",
                 )}
               >
-                <span className="w-12 font-mono">{r.time}</span>
+                <span className="w-12 font-mono">
+                  {r.time}
+                  {r.booking.lane && <span className="ml-0.5 text-xs text-muted-foreground">{r.booking.lane}</span>}
+                </span>
                 <span className="flex min-w-0 flex-1 items-center gap-1.5">
                   {r.booking.source === "ai" ? <Bot className="size-4 shrink-0 text-violet-500" /> : <UserRound className="size-4 shrink-0" />}
                   <span className="truncate font-medium">{r.booking.customer.name}</span>
                   {r.booking.customer.platform && <span className="text-xs text-muted-foreground">· {r.booking.customer.platform}</span>}
                   {r.booking.customer.contact && <span className="truncate text-xs text-muted-foreground">· {r.booking.customer.contact}</span>}
+                  {r.booking.vehicle && <span className="truncate text-xs font-medium">· {r.booking.vehicle.title}</span>}
                 </span>
                 <span className={cn("flex items-center gap-1 text-xs", r.booking.status === "held" && "text-amber-700 dark:text-amber-300")}>
                   {r.booking.status === "held" && <Clock className="size-3" />}

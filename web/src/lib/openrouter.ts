@@ -3,8 +3,34 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { globalAiDoc, userDoc } from "@/lib/firebase/paths";
 import { decrypt } from "@/lib/ai-crypto";
+import { HttpError } from "@/lib/auth-guard";
 
 export const OPENROUTER_URL = process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1";
+
+/** One system + user completion; returns the text without a wrapping Markdown fence. */
+export async function llmText(apiKey: string, model: string, system: string, user: string, maxTokens: number, temperature = 0.1) {
+  const res = await fetch(`${OPENROUTER_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://autolix-d71c4.web.app",
+      "X-Title": "Social Planner",
+    },
+    body: JSON.stringify({
+      model,
+      temperature,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
+  if (!res.ok) throw new HttpError(502, `OpenRouter: ${body.error?.message ?? res.status}`);
+  return (body.choices?.[0]?.message?.content ?? "").replace(/^```(?:markdown|md)?\s*\n|\n```\s*$/g, "").trim();
+}
 
 export const AI_MODES = ["off", "manual", "auto"] as const;
 export type AiMode = (typeof AI_MODES)[number];

@@ -11,6 +11,7 @@ export type PostInput = {
   scheduledFor?: string | null; // ISO with offset
   publishNow?: boolean;
   timezone?: string;
+  watermark?: boolean; // burn the workspace logo into the images (Ajustes → Imágenes)
 };
 
 /** Resolves account ids to Zernio platform targets, ensuring they belong to the user. */

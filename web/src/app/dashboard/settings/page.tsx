@@ -1,13 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Bot, Building2, CalendarClock, Share2, UserRound, UsersRound } from "lucide-react";
+import { Bot, Building2, CalendarClock, ImageIcon, Share2, UserRound, UsersRound } from "lucide-react";
 import { AiAgentCard } from "@/components/settings/ai-agent-card";
 import { KnowledgeCard } from "@/components/settings/knowledge-card";
+import { FollowUpCard } from "@/components/settings/followup-card";
+import { AgentTestChat } from "@/components/settings/agent-test-chat";
+import { ImagesCard } from "@/components/settings/images-card";
 import { AgendasCard } from "@/components/settings/agendas-card";
 import { AccountsCard } from "@/components/settings/accounts-card";
 import { ProfileCard } from "@/components/settings/profile-card";
 import { CompanyCard } from "@/components/settings/company-card";
+import { QuoteSettingsCard } from "@/components/settings/quote-settings-card";
 import { UserCard } from "@/components/settings/user-card";
 import { TeamCard } from "@/components/settings/team-card";
 import { useCan } from "@/hooks/use-me";
@@ -20,6 +24,7 @@ const TABS = [
   { id: "redes", label: "Redes", icon: Share2, perm: "settings.redes" },
   { id: "agendas", label: "Agendas", icon: CalendarClock, perm: "settings.agendas" },
   { id: "agente", label: "Agente IA", icon: Bot, perm: "settings.agente" },
+  { id: "imagenes", label: "Imágenes", icon: ImageIcon, perm: "settings.imagenes" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 const ALIASES: Record<string, TabId> = { cuentas: "redes", usuario: "perfil" }; // old links
@@ -62,8 +67,9 @@ export default function SettingsPage() {
           <ProfileCard />
           <UserCard />
         </TabsContent>
-        <TabsContent value="empresa">
+        <TabsContent value="empresa" className="space-y-4">
           <CompanyCard />
+          <QuoteSettingsCard />
         </TabsContent>
         <TabsContent value="usuarios">
           <TeamCard />
@@ -76,7 +82,12 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="agente" className="space-y-4">
           <AiAgentCard />
+          <AgentTestChat />
           <KnowledgeCard />
+          <FollowUpCard />
+        </TabsContent>
+        <TabsContent value="imagenes">
+          <ImagesCard />
         </TabsContent>
       </Tabs>
     </div>

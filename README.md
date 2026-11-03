@@ -11,16 +11,16 @@ firestore.rules, firestore.indexes.json, firebase.json
 scripts/test-webhook.mjs   envía un webhook firmado al emulador
 ```
 
-## Datos en Firestore (todo bajo `app-autolix`)
+## Datos en Firestore (todo bajo `app-autolix-prod`)
 
 | Ruta | Quién escribe |
 |---|---|
-| `app-autolix/{uid}` | API (al primer uso crea el perfil en Zernio) |
-| `app-autolix/{uid}/accounts/{accountId}` | API |
-| `app-autolix/{uid}/posts/{postId}` | API al crear; webhook actualiza estado |
-| `app-autolix/{uid}/posts/{postId}/alMessages/{commentId}` | webhook / `alReplyToComment` |
-| `app-autolix/{uid}/conversations/{convId}/messages/{id}` | webhook (DMs) |
-| `app-autolix/_system/zernio{Profiles,Accounts,Posts}/{id}` | índices de enrutado, solo servidor |
+| `app-autolix-prod/{uid}` | API (al primer uso crea el perfil en Zernio) |
+| `app-autolix-prod/{uid}/accounts/{accountId}` | API |
+| `app-autolix-prod/{uid}/posts/{postId}` | API al crear; webhook actualiza estado |
+| `app-autolix-prod/{uid}/posts/{postId}/alMessages/{commentId}` | webhook / `alReplyToComment` |
+| `app-autolix-prod/{uid}/conversations/{convId}/messages/{id}` | webhook (DMs) |
+| `app-autolix-prod/_system/zernio{Profiles,Accounts,Posts}/{id}` | índices de enrutado, solo servidor |
 
 La UI solo lee Firestore con `onSnapshot`. El id de cada mensaje es el id del comentario de la red,
 así reintentos de webhook y nuestras propias respuestas no se duplican.

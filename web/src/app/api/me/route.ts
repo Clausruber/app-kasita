@@ -4,6 +4,7 @@ import { HttpError, withUser } from "@/lib/auth-guard";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { tenantDoc, userDoc } from "@/lib/firebase/paths";
 import { ensureTenant, isSuperAdmin, tenantStatus } from "@/lib/tenants";
+import { ensureTestDriveAgenda } from "@/lib/agendas";
 
 /**
  * The signed-in user's role, workspace and access (drives the dashboard gate, the nav and the tabs).
@@ -19,18 +20,24 @@ export const GET = withUser(
         workspaceUid: a.uid,
         email: a.email,
         role: "member",
+        sellerId: a.memberId,
         teamRole: a.role,
         perms: a.perms,
         status: a.status === "active" ? workspaceStatus : "disabled",
       });
     }
     await ensureTenant(user);
-    const [superadmin, status] = await Promise.all([isSuperAdmin(user), tenantStatus(a.uid)]);
+    const [superadmin, status] = await Promise.all([
+      isSuperAdmin(user),
+      tenantStatus(a.uid),
+      ensureTestDriveAgenda(a.uid).catch((e) => console.warn("test drive agenda", e)),
+    ]);
     return NextResponse.json({
       uid: a.authUid,
       workspaceUid: a.uid,
       email: a.email,
       role: superadmin ? "superadmin" : "admin",
+      sellerId: "owner",
       teamRole: null,
       perms: null,
       status,

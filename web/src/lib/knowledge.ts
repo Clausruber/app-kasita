@@ -2,7 +2,7 @@ import "server-only";
 
 import { extractText, getDocumentProxy } from "unpdf";
 import { HttpError } from "@/lib/auth-guard";
-import { OPENROUTER_URL, type AiSettings } from "@/lib/openrouter";
+import { llmText as llm, type AiSettings } from "@/lib/openrouter";
 
 // Limits keep every Firestore doc well under 1 MiB and the manual small enough for every prompt.
 export const MAX_PDF_BYTES = 15 * 1024 * 1024;
@@ -22,30 +22,6 @@ export async function extractPdfText(bytes: Uint8Array) {
   } catch {
     throw new HttpError(400, "No se pudo leer el PDF (¿está protegido con contraseña o dañado?)");
   }
-}
-
-async function llm(apiKey: string, model: string, system: string, user: string, maxTokens: number) {
-  const res = await fetch(`${OPENROUTER_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://autolix-d71c4.web.app",
-      "X-Title": "Social Planner",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      max_tokens: maxTokens,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  const body = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
-  if (!res.ok) throw new HttpError(502, `OpenRouter: ${body.error?.message ?? res.status}`);
-  return (body.choices?.[0]?.message?.content ?? "").replace(/^```(?:markdown|md)?\s*\n|\n```\s*$/g, "").trim();
 }
 
 /** Splits text on paragraph boundaries into chunks of at most `size` chars. */

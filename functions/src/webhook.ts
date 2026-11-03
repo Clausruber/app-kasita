@@ -214,7 +214,9 @@ async function handleDirectMessage(uid: string, p: Json) {
         ...(incoming ? { participant: { name: m.sender?.name ?? m.sender?.username ?? "", picture: m.sender?.picture ?? null } } : {}),
         lastMessage: m.text ?? "",
         lastMessageAt: FieldValue.serverTimestamp(),
-        ...(incoming ? { unreadCount: FieldValue.increment(1) } : {}),
+        // Who spoke last: the follow-up scheduler flags conversations left waiting on us.
+        lastDirection: incoming ? "in" : "out",
+        ...(incoming ? { unreadCount: FieldValue.increment(1), lastInboundAt: FieldValue.serverTimestamp() } : {}),
       },
       { merge: true },
     );

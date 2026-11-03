@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { Agenda } from "@/lib/types";
 import { DAYS, WeeklyHours } from "@/components/shared/weekly-hours";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +31,14 @@ const blank = (): Draft => ({
   minNoticeMin: 60,
   maxDaysAhead: 60,
   active: true,
+  lanes: 1,
+  vehicleRequired: false,
 });
+
+const LANE_OPTIONS = [1, 2, 3, 4, 5, 6].map((n) => ({
+  value: n,
+  label: n === 1 ? "1 (una cita por horario)" : `${n} (${"ABCDEF".slice(0, n).split("").join(", ")})`,
+}));
 
 /** Create / edit a service agenda: service, duration, weekly hours and blocked dates. */
 export function AgendaEditor({ agenda, open, onOpenChange }: { agenda: Agenda | null; open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -111,6 +119,29 @@ export function AgendaEditor({ agenda, open, onOpenChange }: { agenda: Agenda | 
             <Label htmlFor="ag-ahead">Reservar hasta (días)</Label>
             <Input id="ag-ahead" {...num("maxDaysAhead")} min={1} />
           </div>
+          <div className="space-y-1">
+            <Label htmlFor="ag-lanes">Citas al mismo tiempo</Label>
+            <select
+              id="ag-lanes"
+              className="h-8 w-full rounded-lg border bg-background px-2 text-sm"
+              value={form.lanes ?? 1}
+              onChange={(e) => set("lanes", Number(e.target.value))}
+            >
+              {LANE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Sub-espacios por horario, p. ej. 2 asesores o 2 autos de prueba a la vez.</p>
+          </div>
+          <label className="flex items-start gap-2 self-center text-sm">
+            <Checkbox className="mt-0.5" checked={!!form.vehicleRequired} onCheckedChange={(c) => set("vehicleRequired", c === true)} />
+            <span>
+              Pedir el auto (prueba de manejo)
+              <span className="block text-xs text-muted-foreground">Cada cita indica qué auto del inventario se prueba; un auto no se agenda dos veces a la misma hora.</span>
+            </span>
+          </label>
         </div>
 
         <div className="space-y-2">

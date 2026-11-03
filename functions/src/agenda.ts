@@ -2,9 +2,10 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
-import { agendaDayDoc, agendaDoc, agendasCol, bookingsCol, tenantsCol } from "./paths";
+import { agendaDayDoc, agendaDoc, agendasCol, bookingsCol, quoteDoc, quoteTokenDoc, taskDoc, tenantsCol } from "./paths";
 import { workspaceOf } from "./actor";
 import { type BookingClientInput, findBookingClient, saveBookingClient } from "./clients";
+import { bookingVehicle } from "./inventory";
 
 const db = () => getFirestore();
 
@@ -27,13 +28,22 @@ export type Agenda = {
   minNoticeMin: number;
   maxDaysAhead: number;
   active: boolean;
+  lanes: number; // parallel bookings per time (sub-spaces A, B, C…)
+  vehicleRequired: boolean; // test drives: every booking says which car
 };
 export type BookingStatus = "held" | "confirmed" | "cancelled" | "expired";
 // Entry of a day's lock doc: times in epoch ms.
-export type Busy = { start: number; end: number; status: BookingStatus; holdExpiresAt?: number | null };
+export type Busy = { start: number; end: number; status: BookingStatus; holdExpiresAt?: number | null; lane?: string; vehicleId?: string | null };
 export type Customer = { name: string; platform?: string | null; authorId?: string | null; username?: string | null; contact?: string | null };
-export type Channel = { kind: "comment" | "dm" | "admin"; postId?: string; messageId?: string; conversationId?: string };
-export type Slot = { start: number; end: number; date: string; time: string };
+export type Channel = { kind: "comment" | "dm" | "admin" | "quote"; postId?: string; messageId?: string; conversationId?: string; quoteId?: string };
+export type Slot = { start: number; end: number; date: string; time: string; lanes: string[] }; // lanes still free
+export type BookingVehicle = { id: string; title: string };
+
+export const LANE_NAMES = "ABCDEF";
+export const MAX_LANES = LANE_NAMES.length;
+const lanesOf = (agenda: Agenda) => LANE_NAMES.slice(0, Math.min(Math.max(agenda.lanes, 1), MAX_LANES)).split("");
+// Bookings made before sub-spaces existed sit in space A.
+const laneOf = (b: Busy) => b.lane || "A";
 
 export class SlotTakenError extends Error {
   constructor(public alternatives: Slot[]) {
@@ -121,9 +131,11 @@ export const isActive = (b: Busy, now: number) =>
 
 /**
  * Free slots of `date` (YYYY-MM-DD in the agenda's timezone): the weekly ranges cut into
- * duration+buffer steps, minus past/too-soon/too-far slots, blocked dates and overlaps with `busy`.
+ * duration+buffer steps, minus past/too-soon/too-far slots and blocked dates. A slot stays free while
+ * one of its sub-spaces (A, B…) has no overlapping booking and, if `vehicleId` is given, that car is
+ * not already booked at that time.
  */
-export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: number): Slot[] {
+export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: number, vehicleId?: string | null): Slot[] {
   const tz = agenda.timezone;
   const today = localDateTime(now, tz).date;
   if (date < today || date > addDays(today, agenda.maxDaysAhead) || agenda.blockedDates.includes(date)) return [];
@@ -142,8 +154,11 @@ export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: nu
       if (local.date !== date || toMin(local.time) !== t) continue;
       if (start < earliest) continue;
       // Buffer around existing bookings too, so off-grid bookings (duration changed later) still fit.
-      if (active.some((b) => start < b.end + buf && b.start < start + dur + buf)) continue;
-      slots.push({ start, end: start + dur, ...local });
+      const overlapping = active.filter((b) => start < b.end + buf && b.start < start + dur + buf);
+      if (vehicleId && overlapping.some((b) => b.vehicleId === vehicleId)) continue;
+      const lanes = lanesOf(agenda).filter((l) => !overlapping.some((b) => laneOf(b) === l));
+      if (!lanes.length) continue;
+      slots.push({ start, end: start + dur, ...local, lanes });
     }
   }
   return slots.sort((a, b) => a.start - b.start);
@@ -167,6 +182,8 @@ export function parseAgenda(id: string, d: FirebaseFirestore.DocumentData | unde
     minNoticeMin: Number(d.minNoticeMin) || 0,
     maxDaysAhead: Number(d.maxDaysAhead) || 60,
     active: d.active !== false,
+    lanes: Math.min(Math.max(Number(d.lanes) || 1, 1), MAX_LANES),
+    vehicleRequired: Boolean(d.vehicleRequired),
   };
 }
 
@@ -183,15 +200,15 @@ export async function listAgendas(uid: string, onlyActive = true) {
   return snap.docs.map((d) => parseAgenda(d.id, d.data())!).filter((a) => !onlyActive || a.active);
 }
 
-export async function getSlots(uid: string, agenda: Agenda, date: string, now = Date.now()) {
+export async function getSlots(uid: string, agenda: Agenda, date: string, now = Date.now(), vehicleId?: string | null) {
   const day = await db().doc(agendaDayDoc(uid, agenda.id, date)).get();
-  return computeSlots(agenda, date, busyOf(day), now);
+  return computeSlots(agenda, date, busyOf(day), now, vehicleId);
 }
 
 /** Next free slots from `date` on (for "that time is taken, what about…"). */
-export async function nearestSlots(uid: string, agenda: Agenda, date: string, max = 5) {
+export async function nearestSlots(uid: string, agenda: Agenda, date: string, max = 5, vehicleId?: string | null) {
   const out: Slot[] = [];
-  for (let i = 0; i < 14 && out.length < max; i++) out.push(...(await getSlots(uid, agenda, addDays(date, i))));
+  for (let i = 0; i < 14 && out.length < max; i++) out.push(...(await getSlots(uid, agenda, addDays(date, i), Date.now(), vehicleId)));
   return out.slice(0, max);
 }
 
@@ -204,7 +221,15 @@ export async function reserveSlot(
   agendaId: string,
   date: string,
   time: string,
-  opts: { status: "held" | "confirmed"; customer: Customer; channel: Channel; source: "ai" | "admin"; notes?: string },
+  opts: {
+    status: "held" | "confirmed";
+    customer: Customer;
+    channel: Channel;
+    source: "ai" | "admin";
+    notes?: string;
+    lane?: string; // a specific sub-space; otherwise the first free one
+    vehicle?: BookingVehicle | null;
+  },
 ) {
   const agendaRef = db().doc(agendaDoc(uid, agendaId));
   const dayRef = db().doc(agendaDayDoc(uid, agendaId, date));
@@ -215,14 +240,17 @@ export async function reserveSlot(
     const [agendaSnap, daySnap] = await Promise.all([tx.get(agendaRef), tx.get(dayRef)]);
     const agenda = parseAgenda(agendaSnap.id, agendaSnap.data());
     if (!agenda || !agenda.active) throw new HttpsError("not-found", "Agenda no encontrada o inactiva");
-    const free = computeSlots(agenda, date, busyOf(daySnap), now);
+    if (agenda.vehicleRequired && !opts.vehicle) throw new HttpsError("invalid-argument", "Indica el auto de la prueba de manejo");
+    const vehicleId = opts.vehicle?.id ?? null;
+    const free = computeSlots(agenda, date, busyOf(daySnap), now, vehicleId);
     const slot = free.find((s) => s.time === time);
-    if (!slot) return { taken: true as const, agenda };
+    const lane = opts.lane ? slot?.lanes.find((l) => l === opts.lane) : slot?.lanes[0];
+    if (!slot || !lane) return { taken: true as const, agenda };
 
     const holdExpiresAt = opts.status === "held" ? now + HOLD_MS : null;
     tx.set(
       dayRef,
-      { busy: { [bookingRef.id]: { start: slot.start, end: slot.end, status: opts.status, holdExpiresAt } } },
+      { busy: { [bookingRef.id]: { start: slot.start, end: slot.end, status: opts.status, holdExpiresAt, lane, vehicleId } } },
       { merge: true },
     );
     tx.set(bookingRef, {
@@ -240,12 +268,14 @@ export async function reserveSlot(
       channel: opts.channel,
       source: opts.source,
       notes: opts.notes ?? "",
+      lane: agenda.lanes > 1 ? lane : null,
+      vehicle: opts.vehicle ?? null,
       createdAt: FieldValue.serverTimestamp(),
     });
-    return { taken: false as const, agenda, slot };
+    return { taken: false as const, agenda, slot, lane };
   });
 
-  if (result.taken) throw new SlotTakenError(await nearestSlots(uid, result.agenda, date));
+  if (result.taken) throw new SlotTakenError(await nearestSlots(uid, result.agenda, date, 5, opts.vehicle?.id));
   return {
     id: bookingRef.id,
     agendaId,
@@ -253,6 +283,8 @@ export async function reserveSlot(
     start: result.slot.start,
     label: formatSlot(result.slot.start, result.agenda.timezone),
     status: opts.status,
+    lane: result.agenda.lanes > 1 ? result.lane : null,
+    vehicle: opts.vehicle ?? null,
   };
 }
 
@@ -269,9 +301,14 @@ export async function confirmBooking(uid: string, bookingId: string) {
     const start = (b.get("start") as Timestamp).toMillis();
     const end = (b.get("end") as Timestamp).toMillis();
     const now = Date.now();
-    const clash = busyOf(day).some((x) => x.id !== bookingId && isActive(x, now) && start < x.end && x.start < end);
+    // Same sub-space, or the same car in any sub-space, at an overlapping time.
+    const lane = (b.get("lane") as string | null) || "A";
+    const vehicleId = (b.get("vehicle.id") as string | undefined) ?? null;
+    const clash = busyOf(day).some(
+      (x) => x.id !== bookingId && isActive(x, now) && start < x.end && x.start < end && (laneOf(x) === lane || (!!vehicleId && x.vehicleId === vehicleId)),
+    );
     if (clash) throw new HttpsError("already-exists", "Ese horario ya fue reservado por otra persona");
-    tx.set(dayRef, { busy: { [bookingId]: { start, end, status: "confirmed", holdExpiresAt: null } } }, { merge: true });
+    tx.set(dayRef, { busy: { [bookingId]: { start, end, status: "confirmed", holdExpiresAt: null, lane, vehicleId } } }, { merge: true });
     tx.update(ref, { status: "confirmed", holdExpiresAt: null, confirmedAt: FieldValue.serverTimestamp() });
   });
 }
@@ -309,11 +346,12 @@ const TIME_RE = /^\d{2}:\d{2}$/;
 
 export const alGetSlots = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda");
-  const { agendaId, date } = req.data as { agendaId?: string; date?: string };
+  const { agendaId, date, vehicleId } = req.data as { agendaId?: string; date?: string; vehicleId?: string };
   if (!agendaId || !date || !DATE_RE.test(date)) throw new HttpsError("invalid-argument", "Faltan agendaId o date");
   const agenda = await getAgenda(uid, agendaId);
   if (!agenda) throw new HttpsError("not-found", "Agenda no encontrada");
-  const slots = await getSlots(uid, agenda, date);
+  // With a car chosen, times when that car already has a test drive are not offered.
+  const slots = await getSlots(uid, agenda, date, Date.now(), vehicleId || null);
   return { timezone: agenda.timezone, slots: slots.map((s) => ({ ...s, label: formatSlot(s.start, agenda.timezone) })) };
 });
 
@@ -323,15 +361,23 @@ export const alGetSlots = onCall(async (req) => {
  */
 export const alBookSlot = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
-  const { agendaId, date, time, customer, notes } = req.data as {
+  const { agendaId, date, time, customer, notes, vehicleId, lane } = req.data as {
     agendaId?: string;
     date?: string;
     time?: string;
     customer?: BookingClientInput;
     notes?: string;
+    vehicleId?: string;
+    lane?: string;
   };
   if (!agendaId || !date || !DATE_RE.test(date) || !time || !TIME_RE.test(time)) throw new HttpsError("invalid-argument", "Datos de reserva incompletos");
   if (!customer?.clientId && !customer?.firstName?.trim()) throw new HttpsError("invalid-argument", "Indica el nombre del cliente");
+  let vehicle: BookingVehicle | null = null;
+  if (vehicleId) {
+    const v = await bookingVehicle(uid, vehicleId);
+    if ("error" in v) throw new HttpsError("invalid-argument", v.error);
+    vehicle = v;
+  }
   const client = await findBookingClient(uid, customer).catch((e: Error) => {
     throw new HttpsError("invalid-argument", e.message);
   });
@@ -342,8 +388,10 @@ export const alBookSlot = onCall(async (req) => {
       channel: { kind: "admin" },
       source: "admin",
       notes: notes?.trim().slice(0, 1000),
+      lane: typeof lane === "string" && LANE_NAMES.includes(lane) && lane.length === 1 ? lane : undefined,
+      vehicle,
     });
-    await saveBookingClient(uid, client, `${booking.service} · ${booking.label}`);
+    await saveBookingClient(uid, client, [booking.service, vehicle?.title, booking.label].filter(Boolean).join(" · "));
     return { ...booking, client: { id: client.ref.id, name: client.name, created: client.created } };
   } catch (e) {
     if (e instanceof SlotTakenError) throw new HttpsError("already-exists", "Ese horario ya no está disponible");
@@ -381,4 +429,89 @@ export const alExpireHolds = onSchedule("every 60 minutes", async () => {
     }
   }
   if (n) logger.info("holds expired", { n });
+});
+
+// ---------- public quote page (/c/{token}): test drives without login ----------
+
+const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+/** Token → quote, rejecting unknown, expired or wrong-car requests. The token is the only credential. */
+async function quoteForBooking(token: unknown, vehicleId: unknown) {
+  if (typeof token !== "string" || !TOKEN_RE.test(token)) throw new HttpsError("not-found", "Cotización no encontrada");
+  const idx = await db().doc(quoteTokenDoc(token)).get();
+  const uid = idx.get("uid") as string | undefined;
+  const quoteId = idx.get("quoteId") as string | undefined;
+  if (!uid || !quoteId) throw new HttpsError("not-found", "Cotización no encontrada");
+  const ref = db().doc(quoteDoc(uid, quoteId));
+  const q = await ref.get();
+  if (!q.exists) throw new HttpsError("not-found", "Cotización no encontrada");
+  const created = (q.get("createdAt") as Timestamp | null)?.toMillis() ?? 0;
+  if (created + (Number(q.get("validDays")) || 7) * 86_400_000 < Date.now()) throw new HttpsError("failed-precondition", "La cotización ya venció; escríbenos por WhatsApp");
+  const vehicles = (q.get("vehicles") ?? []) as { id: string }[];
+  if (typeof vehicleId !== "string" || !vehicles.some((v) => v.id === vehicleId)) throw new HttpsError("invalid-argument", "Ese auto no está en la cotización");
+  const agendas = await listAgendas(uid);
+  const agenda = agendas.find((a) => a.vehicleRequired);
+  if (!agenda) throw new HttpsError("failed-precondition", "No hay agenda de pruebas de manejo");
+  return { uid, quoteId, ref, q, agenda, vehicleId };
+}
+
+export const alQuoteSlots = onCall(async (req) => {
+  const { token, vehicleId, date } = (req.data ?? {}) as { token?: string; vehicleId?: string; date?: string };
+  if (!date || !DATE_RE.test(date)) throw new HttpsError("invalid-argument", "Fecha no válida");
+  const { uid, agenda } = await quoteForBooking(token, vehicleId);
+  const slots = await getSlots(uid, agenda, date, Date.now(), vehicleId);
+  return { timezone: agenda.timezone, slots: slots.map((s) => ({ time: s.time, label: formatSlot(s.start, agenda.timezone) })) };
+});
+
+/** One active test drive per quote; the booking is confirmed and the seller gets a follow-up. */
+export const alQuoteBook = onCall(async (req) => {
+  const { token, vehicleId, date, time, name, whatsapp } = (req.data ?? {}) as Record<string, string | undefined>;
+  if (!date || !DATE_RE.test(date) || !time || !TIME_RE.test(time)) throw new HttpsError("invalid-argument", "Elige día y hora");
+  if (!name?.trim()) throw new HttpsError("invalid-argument", "Indica tu nombre");
+  const { uid, quoteId, ref, q, agenda } = await quoteForBooking(token, vehicleId);
+  // Empty = the WhatsApp saved with the quote (the page only shows its last digits).
+  const phone = (whatsapp ?? "").trim() || ((q.get("clientWhatsapp") as string | undefined) ?? "");
+  if (phone.replace(/\D/g, "").length < 8) throw new HttpsError("invalid-argument", "Indica tu WhatsApp");
+  const prev = q.get("bookingId") as string | null;
+  if (prev) {
+    const b = await db().collection(bookingsCol(uid)).doc(prev).get();
+    if (["held", "confirmed"].includes(b.get("status"))) throw new HttpsError("already-exists", "Ya tienes una prueba de manejo agendada con esta cotización");
+  }
+  const vehicle = await bookingVehicle(uid, vehicleId);
+  if ("error" in vehicle) throw new HttpsError("failed-precondition", vehicle.error);
+  const [firstName, ...rest] = name.trim().split(/\s+/);
+  const clientId = (q.get("clientId") as string | null) ?? undefined;
+  const client = await findBookingClient(uid, { clientId, firstName, lastName: rest.join(" "), whatsapp: phone }).catch((e: Error) => {
+    throw new HttpsError("invalid-argument", e.message);
+  });
+  try {
+    const booking = await reserveSlot(uid, agenda.id, date, time, {
+      status: "confirmed",
+      customer: { name: client.name, platform: client.platform, authorId: client.authorId, contact: client.whatsapp },
+      channel: { kind: "quote", quoteId },
+      source: "admin",
+      notes: `Agendada por el cliente desde la cotización ${q.get("folio")}`,
+      vehicle,
+    });
+    await saveBookingClient(uid, client, [booking.service, vehicle.title, booking.label].filter(Boolean).join(" · "));
+    await ref.update({ bookingId: booking.id });
+    await db().doc(taskDoc(uid, `quote_booking_${quoteId}_${booking.id}`)).set({
+      title: `${client.name} agendó ${booking.service.toLowerCase()} del ${vehicle.title}: ${booking.label}`,
+      dueAt: Timestamp.fromMillis(booking.start),
+      assigneeId: (q.get("sellerId") as string | null) ?? null,
+      clientId: client.ref.id,
+      dealId: (q.get("dealId") as string | null) ?? null,
+      vehicleId: vehicle.id,
+      conversationId: (q.get("conversationId") as string | null) ?? null,
+      kind: "quote_booking",
+      done: false,
+      doneAt: null,
+      notes: "",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return { label: booking.label, lane: booking.lane };
+  } catch (e) {
+    if (e instanceof SlotTakenError) throw new HttpsError("already-exists", "Ese horario se acaba de ocupar; elige otro");
+    throw e;
+  }
 });

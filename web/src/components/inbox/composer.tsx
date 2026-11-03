@@ -2,15 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { CalendarCheck, Paperclip, Send, Sparkles, UserRoundPen, X } from "lucide-react";
+import { BookOpen, CalendarCheck, Paperclip, Send, Sparkles, UserRoundPen, X } from "lucide-react";
 import { uploadMedia } from "@/lib/api";
 import type { Message } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useCan } from "@/hooks/use-me";
+import { CatalogDrawer, type CatalogPrefill } from "@/components/quotes/catalog-drawer";
 
-export type SendInput = { text: string; attachmentUrl?: string; booking?: "confirm" | "cancel"; saveClient?: boolean };
+export type SendInput = {
+  text: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  attachmentType?: "image" | "file";
+  booking?: "confirm" | "cancel";
+  saveClient?: boolean;
+};
 
 const FIELD_LABEL = { firstName: "Nombre", lastName: "Apellidos", whatsapp: "WhatsApp", email: "Email" } as const;
 
@@ -25,16 +33,20 @@ export function Composer({
   attachHint,
   onSend,
   onSuggest,
+  catalog,
 }: {
   latest: Message;
   placeholder: string;
   canAttach: boolean;
   attachHint?: string;
+  catalog?: CatalogPrefill; // DMs: "Catálogo" opens the drawer and attaches the PDF
   onSend: (input: SendInput) => Promise<void>;
   onSuggest: (note?: string) => Promise<string>;
 }) {
   const [text, setText] = useState("");
-  const [attachment, setAttachment] = useState<{ url: string; name: string } | null>(null);
+  const [attachment, setAttachment] = useState<{ url: string; name: string; type: "image" | "file" } | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const canCatalog = useCan()("inventory");
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -86,7 +98,7 @@ export function Composer({
     setUploading(true);
     try {
       const { url } = await uploadMedia(file);
-      setAttachment({ url, name: file.name });
+      setAttachment({ url, name: file.name, type: "image" });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -95,12 +107,12 @@ export function Composer({
   }
 
   async function send() {
-    if (!text.trim()) return toast.error("Escribe una respuesta");
+    if (!text.trim() && !attachment) return toast.error("Escribe una respuesta");
     setSending(true);
     try {
       await onSend({
         text,
-        ...(attachment ? { attachmentUrl: attachment.url } : {}),
+        ...(attachment ? { attachmentUrl: attachment.url, attachmentName: attachment.name, attachmentType: attachment.type } : {}),
         ...(proposed ? { booking: confirmBooking ? "confirm" : "cancel" } : {}),
         ...(proposedClient ? { saveClient } : {}),
       });
@@ -177,9 +189,18 @@ export function Composer({
       )}
       {attachment && (
         <div className="flex items-center gap-2 rounded-lg border p-1.5 text-xs">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={attachment.url} alt="" className="size-10 rounded object-cover" />
+          {attachment.type === "file" ? (
+            <span className="flex size-10 items-center justify-center rounded bg-red-500/10 text-[10px] font-bold text-red-700 dark:text-red-300">PDF</span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={attachment.url} alt="" className="size-10 rounded object-cover" />
+          )}
           <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
+          {attachment.type === "file" && (
+            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+              Ver
+            </a>
+          )}
           <Button variant="ghost" size="icon-xs" aria-label="Quitar anexo" onClick={() => setAttachment(null)}>
             <X />
           </Button>
@@ -214,6 +235,11 @@ export function Composer({
         >
           <Paperclip /> {uploading ? "Subiendo…" : "Anexo"}
         </Button>
+        {catalog && canCatalog && (
+          <Button variant="outline" size="sm" disabled={sending} title="Armar una cotización (link) con autos del inventario" onClick={() => setCatalogOpen(true)}>
+            <BookOpen /> Catálogo
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -224,10 +250,20 @@ export function Composer({
           <Sparkles /> {suggesting ? "Pensando…" : "Sugerir"}
         </Button>
         <span className="hidden text-xs text-muted-foreground sm:inline">Ctrl+Enter para enviar</span>
-        <Button size="sm" className="ml-auto" disabled={sending || uploading || !text.trim()} onClick={send}>
+        <Button size="sm" className="ml-auto" disabled={sending || uploading || (!text.trim() && !attachment)} onClick={send}>
           <Send /> {sending ? "Enviando…" : "Enviar"}
         </Button>
       </div>
+      {catalog && catalogOpen && (
+        <CatalogDrawer
+          open
+          onOpenChange={setCatalogOpen}
+          mode="insert"
+          prefill={catalog}
+          // The link goes into the message; the seller edits and sends it (never sent automatically).
+          onInsertLink={(message) => setText((t) => (t.trim() ? `${t.trimEnd()}\n\n${message}` : message))}
+        />
+      )}
     </footer>
   );
 }
@@ -236,7 +272,9 @@ export function Composer({
 export function BookingChip({ booking }: { booking: NonNullable<Message["booking"]> }) {
   return (
     <span className="flex items-center gap-0.5 rounded bg-emerald-500/15 px-1 text-emerald-700 dark:text-emerald-300">
-      <CalendarCheck className="size-3" /> Cita: {booking.service} · {booking.label}
+      <CalendarCheck className="size-3" /> Cita: {booking.service}
+      {booking.vehicle ? ` · ${booking.vehicle}` : ""} · {booking.label}
+      {booking.lane ? ` · espacio ${booking.lane}` : ""}
     </span>
   );
 }

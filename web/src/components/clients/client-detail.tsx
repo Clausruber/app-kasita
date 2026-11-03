@@ -11,6 +11,9 @@ import { platformName } from "@/lib/platforms";
 import type { Client, ClientBooking } from "@/lib/types";
 import { Avatar } from "@/components/inbox/commenter-list";
 import { BookButton } from "@/components/agenda/booking-modal";
+import { NewDealButton } from "@/components/deals/deal-dialogs";
+import { NewTaskButton } from "@/components/tasks/task-dialog";
+import { QuoteHistory } from "@/components/quotes/quote-history";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -93,6 +96,11 @@ export function ClientDetail({ client }: { client: Client }) {
             {client.lastContactAt && ` · último ${format(new Date(client.lastContactAt), "d MMM yyyy, HH:mm", { locale: es })}`}
           </p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <NewDealButton prefill={{ clientId: client.id }} />
+        <NewTaskButton prefill={{ clientId: client.id, title: `Dar seguimiento a ${[client.firstName, client.lastName].filter(Boolean).join(" ") || client.displayName}` }} />
       </div>
 
       {client.lastMessage && (
@@ -182,6 +190,8 @@ export function ClientDetail({ client }: { client: Client }) {
         )}
       </div>
       )}
+
+      <QuoteHistory clientId={client.id} clientName={[client.firstName, client.lastName].filter(Boolean).join(" ") || client.displayName} clientWhatsapp={client.whatsapp} />
 
       <div className="space-y-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">

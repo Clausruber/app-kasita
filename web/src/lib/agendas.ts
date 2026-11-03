@@ -1,6 +1,9 @@
 import "server-only";
 
+import { FieldValue } from "firebase-admin/firestore";
 import { HttpError } from "@/lib/auth-guard";
+import { adminDb } from "@/lib/firebase/admin";
+import { agendaDoc, userDoc } from "@/lib/firebase/paths";
 
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
@@ -51,5 +54,54 @@ export function parseAgendaInput(body: Record<string, unknown>) {
     minNoticeMin: int(body.minNoticeMin ?? 0, 0, 30 * 24 * 60, "La antelación mínima"),
     maxDaysAhead: int(body.maxDaysAhead ?? 60, 1, 365, "Los días de antelación"),
     active: body.active !== false,
+    lanes: int(body.lanes ?? 1, 1, MAX_LANES, "Los espacios por horario"),
+    vehicleRequired: Boolean(body.vehicleRequired),
   };
+}
+
+export const MAX_LANES = 6; // A–F, same as functions/src/agenda.ts
+export const TEST_DRIVE_AGENDA_ID = "prueba-de-manejo";
+
+/**
+ * Every account starts with a "Prueba de manejo" agenda the admin then adjusts. Created once: the
+ * flag on the workspace doc keeps it from coming back if the admin deletes it.
+ */
+export async function ensureTestDriveAgenda(uid: string) {
+  const userRef = adminDb.doc(userDoc(uid));
+  const agendaRef = adminDb.doc(agendaDoc(uid, TEST_DRIVE_AGENDA_ID));
+  await adminDb.runTransaction(async (tx) => {
+    const [user, agenda] = await Promise.all([tx.get(userRef), tx.get(agendaRef)]);
+    if (user.get("seeded.testDriveAgenda")) return;
+    if (!agenda.exists) {
+      const range = (start: string, end: string) => [{ start, end }];
+      tx.set(agendaRef, {
+        service: "Prueba de manejo",
+        name: "Prueba de manejo",
+        kind: "test_drive",
+        description: "Prueba de manejo de un auto del inventario. Trae tu licencia de conducir vigente e identificación oficial.",
+        price: "",
+        durationMin: 45,
+        bufferMin: 15,
+        timezone: (user.get("company.timezone") as string | undefined) || "America/Mexico_City",
+        weekly: {
+          mon: range("10:00", "18:00"),
+          tue: range("10:00", "18:00"),
+          wed: range("10:00", "18:00"),
+          thu: range("10:00", "18:00"),
+          fri: range("10:00", "18:00"),
+          sat: range("10:00", "14:00"),
+          sun: [],
+        },
+        blockedDates: [],
+        minNoticeMin: 120,
+        maxDaysAhead: 30,
+        active: true,
+        lanes: 2,
+        vehicleRequired: true,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    tx.set(userRef, { seeded: { testDriveAgenda: true } }, { merge: true });
+  });
 }

@@ -1,6 +1,6 @@
 // Sends a signed fake Zernio webhook to the local functions emulator.
 // Usage: node scripts/test-webhook.mjs <uid> [commentId] [event]
-// Seeds app-autolix/_system/zernioAccounts/acc_test -> uid in the Firestore emulator first.
+// Seeds app-autolix-prod/_system/zernioAccounts/acc_test -> uid in the Firestore emulator first.
 import crypto from "node:crypto";
 
 const [uid, commentId = "c_" + Date.now(), event = "comment.received"] = process.argv.slice(2);
@@ -9,7 +9,7 @@ const PROJECT = process.env.PROJECT || "demo-social";
 const SECRET = process.env.ZERNIO_WEBHOOK_SECRET || "test-secret";
 const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/documents`;
 
-await fetch(`${FS}/app-autolix/_system/zernioAccounts/acc_test`, {
+await fetch(`${FS}/app-autolix-prod/_system/zernioAccounts/acc_test`, {
   method: "PATCH",
   headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
   body: JSON.stringify({ fields: { uid: { stringValue: uid }, platform: { stringValue: "instagram" } } }),

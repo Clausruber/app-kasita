@@ -10,8 +10,11 @@ import { type ClientProposal, applyClientProposal } from "./clients";
 
 type BookingAction = "confirm" | "cancel";
 type DraftBooking = { id: string; service: string; label: string; start: number };
+export type DmAttachment = { url: string; name: string; type: "file" | "image" };
+
 type SendOpts = {
   attachmentUrl?: string;
+  attachment?: DmAttachment | null; // DMs: a file (catalog PDF) or an image
   requestId?: string;
   sentBy: "user" | "ai";
   booking?: BookingAction;
@@ -148,11 +151,18 @@ export async function sendDm(uid: string, convId: string, messageId: string | un
   });
   const booking = await settleBooking(uid, msgSnap, opts);
   await settleClient(uid, msgSnap, opts);
+  const att = opts.attachment ?? null;
   const res = await zernio<{ data?: { messageId?: string } }>(key, `/inbox/conversations/${encodeURIComponent(zernioConvId)}/messages`, {
     method: "POST",
     idempotencyKey: opts.requestId,
-    body: { accountId, message: text.trim() },
+    body: {
+      accountId,
+      ...(text.trim() ? { message: text.trim() } : {}),
+      ...(att ? { attachmentUrl: att.url, attachmentType: att.type, attachmentName: att.name } : {}),
+    },
   }).catch((e: Error) => {
+    if (att && /PLATFORM_LIMITATION|not support/i.test(e.message))
+      throw new HttpsError("failed-precondition", "Esta red no acepta archivos en mensajes directos: quita el adjunto y envía el link.");
     throw new HttpsError("internal", e.message);
   });
 
@@ -169,7 +179,7 @@ export async function sendDm(uid: string, convId: string, messageId: string | un
         accountId,
         author: { id: null, name: opts.sentBy === "ai" ? "Agente IA" : "Tú", username: null, picture: null },
         text: text.trim(),
-        attachments: [],
+        attachments: att ? [att] : [],
         direction: "out",
         sentBy: opts.sentBy,
         read: true,
@@ -177,24 +187,41 @@ export async function sendDm(uid: string, convId: string, messageId: string | un
         createdAt: FieldValue.serverTimestamp(),
       });
     else tx.update(ref, { sentBy: opts.sentBy, booking });
-    tx.set(convSnap.ref, { lastMessage: text.trim(), lastMessageAt: FieldValue.serverTimestamp() }, { merge: true });
+    tx.set(convSnap.ref, { lastMessage: text.trim() || (att ? `📎 ${att.name}` : ""), lastMessageAt: FieldValue.serverTimestamp(), lastDirection: "out" }, { merge: true });
     if (msgSnap) tx.update(msgSnap.ref, { replied: true, aiDraft: null, ...(opts.sentBy === "ai" ? { aiStatus: "sent" } : {}) });
   });
   return { id: ref.id, booking };
 }
 
+// Files the app itself uploads: Zernio media or Firebase Storage. Zernio fetches them publicly.
+const isAttachmentUrl = (raw: string) => {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && (u.host.endsWith("zernio.com") || u.host === "firebasestorage.googleapis.com");
+  } catch {
+    return false;
+  }
+};
+
 export const alReplyToDm = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
-  const { conversationId, messageId, text, requestId, booking, saveClient } = req.data as {
+  const { conversationId, messageId, text, requestId, booking, saveClient, attachmentUrl, attachmentName, attachmentType } = req.data as {
     conversationId?: string;
     messageId?: string;
     text?: string;
     requestId?: string;
     booking?: BookingAction;
     saveClient?: boolean;
+    attachmentUrl?: string;
+    attachmentName?: string;
+    attachmentType?: string;
   };
-  if (!conversationId || !text?.trim()) throw new HttpsError("invalid-argument", "Faltan conversationId o text");
-  return sendDm(uid, conversationId, messageId, text, { requestId, sentBy: "user", booking, saveClient });
+  if (attachmentUrl && !isAttachmentUrl(attachmentUrl)) throw new HttpsError("invalid-argument", "Anexo no válido");
+  if (!conversationId || (!text?.trim() && !attachmentUrl)) throw new HttpsError("invalid-argument", "Faltan conversationId o text");
+  const attachment: DmAttachment | null = attachmentUrl
+    ? { url: attachmentUrl, name: String(attachmentName ?? "archivo").slice(0, 120), type: attachmentType === "image" ? "image" : "file" }
+    : null;
+  return sendDm(uid, conversationId, messageId, text ?? "", { requestId, sentBy: "user", booking, saveClient, attachment });
 });
 
 export const alReplyToComment = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {

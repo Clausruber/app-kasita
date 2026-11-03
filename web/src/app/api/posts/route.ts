@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { postsCol, zernioPostIndex } from "@/lib/firebase/paths";
 import { resolveTargets, validateSchedule, type PostInput } from "@/lib/posts-server";
 import { zernio } from "@/lib/zernio";
+import { watermarkMedia } from "@/lib/watermark-server";
 
 type ZernioPost = {
   _id: string;
@@ -20,6 +21,8 @@ export const POST = withPerm("posts.create", async (req, user) => {
   if (!input.content?.trim() && !input.mediaItems?.length) throw new HttpError(400, "El post está vacío");
   validateSchedule(input);
   const platforms = await resolveTargets(user.uid, input.accountIds ?? []);
+  // Copies with the logo; the original uploads stay untouched.
+  const mediaItems = input.watermark && input.mediaItems?.length ? await watermarkMedia(user.uid, input.mediaItems) : (input.mediaItems ?? []);
 
   const ref = adminDb.collection(postsCol(user.uid)).doc();
   const res = await zernio<{ post: ZernioPost }>(user.uid, "/posts", {
@@ -27,7 +30,7 @@ export const POST = withPerm("posts.create", async (req, user) => {
     idempotencyKey: ref.id,
     body: {
       content: input.content ?? "",
-      mediaItems: input.mediaItems ?? [],
+      mediaItems,
       platforms,
       ...(input.publishNow ? { publishNow: true } : { scheduledFor: input.scheduledFor }),
       timezone: input.timezone,
@@ -40,7 +43,8 @@ export const POST = withPerm("posts.create", async (req, user) => {
   const batch = adminDb.batch();
   batch.set(ref, {
     content: input.content ?? "",
-    mediaItems: input.mediaItems ?? [],
+    mediaItems,
+    watermark: !!input.watermark,
     platforms: platforms.map((p) => ({
       ...p,
       status: zp.platforms?.find((z) => z.platform === p.platform)?.status ?? zp.status,

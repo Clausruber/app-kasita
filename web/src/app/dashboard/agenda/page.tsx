@@ -144,7 +144,11 @@ export default function AgendaPage() {
                     <li key={b.id} className="flex flex-wrap items-center gap-2 py-2">
                       <span className="w-40 capitalize">{whenLabel(b.start.toMillis(), b.timezone)}</span>
                       <span className="font-medium">{b.customer.name}</span>
-                      <span className="text-muted-foreground">· {b.service}</span>
+                      <span className="text-muted-foreground">
+                        · {b.service}
+                        {b.lane ? ` ${b.lane}` : ""}
+                        {b.vehicle ? ` · ${b.vehicle.title}` : ""}
+                      </span>
                       {b.source === "ai" && <Bot className="size-4 text-violet-500" aria-label="Reservada por el agente" />}
                       <span className={cn("ml-auto text-xs", b.status === "held" && "text-amber-700 dark:text-amber-300")}>{STATUS_LABEL[b.status]}</span>
                     </li>

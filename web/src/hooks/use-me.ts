@@ -10,6 +10,7 @@ export type Me = {
   workspaceUid: string; // owner whose data is shown (= uid for owners)
   email: string | null;
   role: "superadmin" | "admin" | "member";
+  sellerId: string | null; // "owner" or the team member id (deals, holds)
   teamRole: "team" | "supervisor" | "admin" | null;
   perms: string[] | null; // null = owner, full access
   status: "pending" | "active" | "disabled";
