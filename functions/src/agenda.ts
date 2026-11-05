@@ -2,10 +2,10 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
-import { agendaDayDoc, agendaDoc, agendasCol, bookingsCol, quoteDoc, quoteTokenDoc, taskDoc, tenantsCol } from "./paths";
+import { agendaDayDoc, agendaDoc, agendasCol, bookingsCol, membersCol, quoteDoc, quoteTokenDoc, taskDoc, tenantsCol, userDoc } from "./paths";
 import { workspaceOf } from "./actor";
 import { type BookingClientInput, findBookingClient, saveBookingClient } from "./clients";
-import { bookingVehicle } from "./inventory";
+import { bookingProperty } from "./inventory";
 
 const db = () => getFirestore();
 
@@ -28,16 +28,22 @@ export type Agenda = {
   minNoticeMin: number;
   maxDaysAhead: number;
   active: boolean;
-  lanes: number; // parallel bookings per time (sub-spaces A, B, C…)
-  vehicleRequired: boolean; // test drives: every booking says which car
+  lanes: number; // parallel bookings per time (sub-spaces A, B, C…); ignored when `agents` is set
+  propertyRequired: boolean; // visits: every booking says which property
+  // Staffed by people: "all" active agents (owner + members) or a list of their ids. Each booking is then
+  // given to one free agent instead of an anonymous sub-space.
+  agents: "all" | string[] | null;
 };
+/** An agent (owner = "owner", else member id) with their own hours; null weekly = the agenda's hours. */
+export type AgendaAgent = { id: string; name: string; weekly: Partial<Record<Weekday, Range[]>> | null; blockedDates: string[] };
 export type BookingStatus = "held" | "confirmed" | "cancelled" | "expired";
 // Entry of a day's lock doc: times in epoch ms.
-export type Busy = { start: number; end: number; status: BookingStatus; holdExpiresAt?: number | null; lane?: string; vehicleId?: string | null };
+export type Busy = { start: number; end: number; status: BookingStatus; holdExpiresAt?: number | null; lane?: string; propertyId?: string | null; assigneeId?: string | null };
 export type Customer = { name: string; platform?: string | null; authorId?: string | null; username?: string | null; contact?: string | null };
 export type Channel = { kind: "comment" | "dm" | "admin" | "quote"; postId?: string; messageId?: string; conversationId?: string; quoteId?: string };
-export type Slot = { start: number; end: number; date: string; time: string; lanes: string[] }; // lanes still free
-export type BookingVehicle = { id: string; title: string };
+// `lanes`: sub-spaces still free, or (agenda with agents) the ids of the agents still free.
+export type Slot = { start: number; end: number; date: string; time: string; lanes: string[] };
+export type BookingProperty = { id: string; title: string };
 
 export const LANE_NAMES = "ABCDEF";
 export const MAX_LANES = LANE_NAMES.length;
@@ -129,13 +135,20 @@ export function formatSlot(ms: number, tz: string) {
 export const isActive = (b: Busy, now: number) =>
   b.status === "confirmed" || (b.status === "held" && (b.holdExpiresAt ?? 0) > now);
 
+/** Who staffs a day: the agenda's agents and the bookings they have that day in other staffed agendas. */
+export type Staffing = { agents: AgendaAgent[]; otherBusy: Busy[] };
+
+const withinHours = (ranges: Range[] | undefined, t: number, dur: number) => (ranges ?? []).some((r) => toMin(r.start) <= t && t + dur <= toMin(r.end));
+
 /**
  * Free slots of `date` (YYYY-MM-DD in the agenda's timezone): the weekly ranges cut into
  * duration+buffer steps, minus past/too-soon/too-far slots and blocked dates. A slot stays free while
- * one of its sub-spaces (A, B…) has no overlapping booking and, if `vehicleId` is given, that car is
- * not already booked at that time.
+ * one of its sub-spaces (A, B…) has no overlapping booking and, if `propertyId` is given, that property is
+ * not already booked at that time. With `staffing` (agenda with agents) a slot is free while some agent is
+ * working then (their own hours, or the agenda's if they set none), is not off that day and has no
+ * overlapping booking in any staffed agenda.
  */
-export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: number, vehicleId?: string | null): Slot[] {
+export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: number, propertyId?: string | null, staffing?: Staffing): Slot[] {
   const tz = agenda.timezone;
   const today = localDateTime(now, tz).date;
   if (date < today || date > addDays(today, agenda.maxDaysAhead) || agenda.blockedDates.includes(date)) return [];
@@ -155,8 +168,20 @@ export function computeSlots(agenda: Agenda, date: string, busy: Busy[], now: nu
       if (start < earliest) continue;
       // Buffer around existing bookings too, so off-grid bookings (duration changed later) still fit.
       const overlapping = active.filter((b) => start < b.end + buf && b.start < start + dur + buf);
-      if (vehicleId && overlapping.some((b) => b.vehicleId === vehicleId)) continue;
-      const lanes = lanesOf(agenda).filter((l) => !overlapping.some((b) => laneOf(b) === l));
+      if (propertyId && overlapping.some((b) => b.propertyId === propertyId)) continue;
+      let lanes: string[];
+      if (staffing) {
+        const all = [...overlapping, ...staffing.otherBusy.filter((b) => isActive(b, now) && start < b.end + buf && b.start < start + dur + buf)];
+        const free = staffing.agents.filter(
+          (a) =>
+            !a.blockedDates.includes(date) &&
+            (a.weekly === null || withinHours(a.weekly[weekdayOf(date)], t, agenda.durationMin)) &&
+            !all.some((b) => b.assigneeId === a.id),
+        );
+        // Bookings from before the agenda had agents have no assignee: each still takes one person.
+        const unassigned = overlapping.filter((b) => !b.assigneeId).length;
+        lanes = free.slice(0, Math.max(0, free.length - unassigned)).map((a) => a.id);
+      } else lanes = lanesOf(agenda).filter((l) => !overlapping.some((b) => laneOf(b) === l));
       if (!lanes.length) continue;
       slots.push({ start, end: start + dur, ...local, lanes });
     }
@@ -183,8 +208,43 @@ export function parseAgenda(id: string, d: FirebaseFirestore.DocumentData | unde
     maxDaysAhead: Number(d.maxDaysAhead) || 60,
     active: d.active !== false,
     lanes: Math.min(Math.max(Number(d.lanes) || 1, 1), MAX_LANES),
-    vehicleRequired: Boolean(d.vehicleRequired),
+    propertyRequired: Boolean(d.propertyRequired),
+    agents: d.agents === "all" ? "all" : Array.isArray(d.agents) ? d.agents.filter((x: unknown) => typeof x === "string") : null,
   };
+}
+
+const availabilityOf = (a: FirebaseFirestore.DocumentData | undefined) => ({
+  weekly: a?.weekly && typeof a.weekly === "object" ? (a.weekly as Partial<Record<Weekday, Range[]>>) : null,
+  blockedDates: Array.isArray(a?.blockedDates) ? (a!.blockedDates as string[]) : [],
+});
+
+/** The agents of a staffed agenda: owner + active members (or the agenda's list), each with their hours. */
+export async function agentsOf(uid: string, agenda: Agenda): Promise<AgendaAgent[]> {
+  if (!agenda.agents) return [];
+  const [owner, members] = await Promise.all([db().doc(userDoc(uid)).get(), db().collection(membersCol(uid)).where("status", "==", "active").get()]);
+  const all: AgendaAgent[] = [
+    { id: "owner", name: (owner.get("displayName") as string) || "Dueño de la cuenta", ...availabilityOf(owner.get("availability")) },
+    ...members.docs.map((m) => ({
+      id: m.id,
+      name: [m.get("firstName"), m.get("lastName")].filter(Boolean).join(" ") || (m.get("email") as string) || "Asesor",
+      ...availabilityOf(m.get("availability")),
+    })),
+  ];
+  return agenda.agents === "all" ? all : all.filter((a) => (agenda.agents as string[]).includes(a.id));
+}
+
+/** Day docs of the other staffed agendas: an agent cannot be in two visits at once, whatever the agenda. */
+async function otherStaffedDays(uid: string, agenda: Agenda, date: string, tx?: FirebaseFirestore.Transaction) {
+  const others = (await listAgendas(uid, false)).filter((a) => a.agents && a.id !== agenda.id);
+  const refs = others.map((a) => db().doc(agendaDayDoc(uid, a.id, date)));
+  const snaps = await Promise.all(refs.map((ref) => (tx ? tx.get(ref) : ref.get())));
+  return snaps.map((s) => ({ ref: s.ref, busy: busyOf(s) }));
+}
+
+async function staffingOf(uid: string, agenda: Agenda, date: string, tx?: FirebaseFirestore.Transaction): Promise<Staffing | undefined> {
+  if (!agenda.agents) return undefined;
+  const [agents, days] = await Promise.all([agentsOf(uid, agenda), otherStaffedDays(uid, agenda, date, tx)]);
+  return { agents, otherBusy: days.flatMap((d) => d.busy) };
 }
 
 const busyOf = (day: FirebaseFirestore.DocumentSnapshot) =>
@@ -200,15 +260,15 @@ export async function listAgendas(uid: string, onlyActive = true) {
   return snap.docs.map((d) => parseAgenda(d.id, d.data())!).filter((a) => !onlyActive || a.active);
 }
 
-export async function getSlots(uid: string, agenda: Agenda, date: string, now = Date.now(), vehicleId?: string | null) {
-  const day = await db().doc(agendaDayDoc(uid, agenda.id, date)).get();
-  return computeSlots(agenda, date, busyOf(day), now, vehicleId);
+export async function getSlots(uid: string, agenda: Agenda, date: string, now = Date.now(), propertyId?: string | null) {
+  const [day, staffing] = await Promise.all([db().doc(agendaDayDoc(uid, agenda.id, date)).get(), staffingOf(uid, agenda, date)]);
+  return computeSlots(agenda, date, busyOf(day), now, propertyId, staffing);
 }
 
 /** Next free slots from `date` on (for "that time is taken, what about…"). */
-export async function nearestSlots(uid: string, agenda: Agenda, date: string, max = 5, vehicleId?: string | null) {
+export async function nearestSlots(uid: string, agenda: Agenda, date: string, max = 5, propertyId?: string | null) {
   const out: Slot[] = [];
-  for (let i = 0; i < 14 && out.length < max; i++) out.push(...(await getSlots(uid, agenda, addDays(date, i), Date.now(), vehicleId)));
+  for (let i = 0; i < 14 && out.length < max; i++) out.push(...(await getSlots(uid, agenda, addDays(date, i), Date.now(), propertyId)));
   return out.slice(0, max);
 }
 
@@ -228,7 +288,9 @@ export async function reserveSlot(
     source: "ai" | "admin";
     notes?: string;
     lane?: string; // a specific sub-space; otherwise the first free one
-    vehicle?: BookingVehicle | null;
+    property?: BookingProperty | null;
+    assigneeId?: string; // staffed agenda: this agent (if free)
+    preferAssigneeIds?: string[]; // staffed agenda: first free of these, else the least busy agent that day
   },
 ) {
   const agendaRef = db().doc(agendaDoc(uid, agendaId));
@@ -240,17 +302,36 @@ export async function reserveSlot(
     const [agendaSnap, daySnap] = await Promise.all([tx.get(agendaRef), tx.get(dayRef)]);
     const agenda = parseAgenda(agendaSnap.id, agendaSnap.data());
     if (!agenda || !agenda.active) throw new HttpsError("not-found", "Agenda no encontrada o inactiva");
-    if (agenda.vehicleRequired && !opts.vehicle) throw new HttpsError("invalid-argument", "Indica el auto de la prueba de manejo");
-    const vehicleId = opts.vehicle?.id ?? null;
-    const free = computeSlots(agenda, date, busyOf(daySnap), now, vehicleId);
+    if (agenda.propertyRequired && !opts.property) throw new HttpsError("invalid-argument", "Indica el inmueble a visitar");
+    const propertyId = opts.property?.id ?? null;
+    const dayBusy = busyOf(daySnap);
+    const staffing = await staffingOf(uid, agenda, date, tx);
+    const free = computeSlots(agenda, date, dayBusy, now, propertyId, staffing);
     const slot = free.find((s) => s.time === time);
-    const lane = opts.lane ? slot?.lanes.find((l) => l === opts.lane) : slot?.lanes[0];
+    let lane: string | undefined;
+    let assignee: AgendaAgent | null = null;
+    if (slot && staffing) {
+      // Requested agent; else a preferred one (who already serves this client); else the least busy that day.
+      const load = (id: string) => [...dayBusy, ...staffing.otherBusy].filter((b) => b.assigneeId === id && isActive(b, now)).length;
+      const id = opts.assigneeId
+        ? slot.lanes.find((l) => l === opts.assigneeId)
+        : (opts.preferAssigneeIds ?? []).find((p) => slot.lanes.includes(p)) ?? [...slot.lanes].sort((a, b) => load(a) - load(b))[0];
+      assignee = staffing.agents.find((a) => a.id === id) ?? null;
+      lane = assignee?.id;
+    } else lane = opts.lane ? slot?.lanes.find((l) => l === opts.lane) : slot?.lanes[0];
     if (!slot || !lane) return { taken: true as const, agenda };
 
+    const label = formatSlot(slot.start, agenda.timezone);
+    // A visit confirmed straight away is a task for its agent (quotes create their own follow-up).
+    const taskRef = assignee && opts.status === "confirmed" && opts.channel.kind !== "quote" ? db().doc(taskDoc(uid, `booking_${bookingRef.id}`)) : null;
     const holdExpiresAt = opts.status === "held" ? now + HOLD_MS : null;
     tx.set(
       dayRef,
-      { busy: { [bookingRef.id]: { start: slot.start, end: slot.end, status: opts.status, holdExpiresAt, lane, vehicleId } } },
+      {
+        busy: {
+          [bookingRef.id]: { start: slot.start, end: slot.end, status: opts.status, holdExpiresAt, ...(assignee ? { assigneeId: assignee.id } : { lane }), propertyId },
+        },
+      },
       { merge: true },
     );
     tx.set(bookingRef, {
@@ -268,14 +349,17 @@ export async function reserveSlot(
       channel: opts.channel,
       source: opts.source,
       notes: opts.notes ?? "",
-      lane: agenda.lanes > 1 ? lane : null,
-      vehicle: opts.vehicle ?? null,
+      lane: !assignee && agenda.lanes > 1 ? lane : null,
+      assigneeId: assignee?.id ?? null,
+      assigneeName: assignee?.name ?? null,
+      property: opts.property ?? null,
       createdAt: FieldValue.serverTimestamp(),
     });
-    return { taken: false as const, agenda, slot, lane };
+    if (taskRef && assignee) tx.set(taskRef, visitTask(assignee.id, slot.start, label, agenda.service, opts.customer.name, opts.property ?? null, opts.channel, bookingRef.id));
+    return { taken: false as const, agenda, slot, lane, assignee };
   });
 
-  if (result.taken) throw new SlotTakenError(await nearestSlots(uid, result.agenda, date, 5, opts.vehicle?.id));
+  if (result.taken) throw new SlotTakenError(await nearestSlots(uid, result.agenda, date, 5, opts.property?.id));
   return {
     id: bookingRef.id,
     agendaId,
@@ -283,8 +367,38 @@ export async function reserveSlot(
     start: result.slot.start,
     label: formatSlot(result.slot.start, result.agenda.timezone),
     status: opts.status,
-    lane: result.agenda.lanes > 1 ? result.lane : null,
-    vehicle: opts.vehicle ?? null,
+    lane: !result.assignee && result.agenda.lanes > 1 ? result.lane : null,
+    assigneeId: result.assignee?.id ?? null,
+    assigneeName: result.assignee?.name ?? null,
+    property: opts.property ?? null,
+  };
+}
+
+/** Follow-up for the agent who will attend a visit (deterministic id: one per booking). */
+function visitTask(
+  assigneeId: string,
+  start: number,
+  label: string,
+  service: string,
+  customerName: string,
+  property: BookingProperty | null,
+  channel: Partial<Channel>,
+  bookingId: string,
+) {
+  return {
+    title: `${service}: ${property?.title ?? "sin inmueble"} con ${customerName || "cliente"} · ${label}`,
+    notes: "",
+    dueAt: Timestamp.fromMillis(start),
+    done: false,
+    doneAt: null,
+    assigneeId,
+    clientId: null,
+    dealId: null,
+    propertyId: property?.id ?? null,
+    conversationId: channel.conversationId ?? null,
+    bookingId,
+    kind: "booking",
+    createdAt: FieldValue.serverTimestamp(),
   };
 }
 
@@ -301,15 +415,37 @@ export async function confirmBooking(uid: string, bookingId: string) {
     const start = (b.get("start") as Timestamp).toMillis();
     const end = (b.get("end") as Timestamp).toMillis();
     const now = Date.now();
-    // Same sub-space, or the same car in any sub-space, at an overlapping time.
+    const assigneeId = (b.get("assigneeId") as string | null) ?? null;
+    // The same agent in any staffed agenda, else the same sub-space; or the same property; at an overlapping time.
+    const agenda = assigneeId ? parseAgenda(b.get("agendaId"), (await tx.get(db().doc(agendaDoc(uid, b.get("agendaId"))))).data()) : null;
+    const others = agenda ? (await otherStaffedDays(uid, agenda, b.get("date"), tx)).flatMap((d) => d.busy) : [];
     const lane = (b.get("lane") as string | null) || "A";
-    const vehicleId = (b.get("vehicle.id") as string | undefined) ?? null;
-    const clash = busyOf(day).some(
-      (x) => x.id !== bookingId && isActive(x, now) && start < x.end && x.start < end && (laneOf(x) === lane || (!!vehicleId && x.vehicleId === vehicleId)),
-    );
+    const propertyId = (b.get("property.id") as string | undefined) ?? null;
+    const overlaps = (x: Busy & { id: string }) => x.id !== bookingId && isActive(x, now) && start < x.end && x.start < end;
+    const clash =
+      busyOf(day).some((x) => overlaps(x) && ((assigneeId ? x.assigneeId === assigneeId : laneOf(x) === lane) || (!!propertyId && x.propertyId === propertyId))) ||
+      (!!assigneeId && others.some((x) => overlaps(x) && x.assigneeId === assigneeId));
     if (clash) throw new HttpsError("already-exists", "Ese horario ya fue reservado por otra persona");
-    tx.set(dayRef, { busy: { [bookingId]: { start, end, status: "confirmed", holdExpiresAt: null, lane, vehicleId } } }, { merge: true });
+    tx.set(
+      dayRef,
+      { busy: { [bookingId]: { start, end, status: "confirmed", holdExpiresAt: null, ...(assigneeId ? { assigneeId } : { lane }), propertyId } } },
+      { merge: true },
+    );
     tx.update(ref, { status: "confirmed", holdExpiresAt: null, confirmedAt: FieldValue.serverTimestamp() });
+    if (assigneeId && b.get("channel.kind") !== "quote")
+      tx.set(
+        db().doc(taskDoc(uid, `booking_${bookingId}`)),
+        visitTask(
+          assigneeId,
+          start,
+          formatSlot(start, b.get("timezone") || "UTC"),
+          b.get("service") ?? "Cita",
+          b.get("customer.name") ?? "",
+          (b.get("property") as BookingProperty | null) ?? null,
+          (b.get("channel") as Channel | undefined) ?? {},
+          bookingId,
+        ),
+      );
   });
 }
 
@@ -321,8 +457,10 @@ export async function cancelBooking(uid: string, bookingId: string, status: "can
     if (!b.exists) throw new HttpsError("not-found", "Reserva no encontrada");
     if (["cancelled", "expired"].includes(b.get("status"))) return;
     if (onlyHeld && b.get("status") !== "held") return;
+    const task = await tx.get(db().doc(taskDoc(uid, `booking_${bookingId}`)));
     tx.update(db().doc(agendaDayDoc(uid, b.get("agendaId"), b.get("date"))), { [`busy.${bookingId}`]: FieldValue.delete() });
     tx.update(ref, { status, cancelledAt: FieldValue.serverTimestamp() });
+    if (task.exists && !task.get("done")) tx.update(task.ref, { done: true, doneAt: FieldValue.serverTimestamp(), notes: "Visita cancelada" });
   });
 }
 
@@ -344,39 +482,45 @@ export async function customerBookings(uid: string, authorId: string) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
-export const alGetSlots = onCall(async (req) => {
+export const kfGetSlots = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda");
-  const { agendaId, date, vehicleId } = req.data as { agendaId?: string; date?: string; vehicleId?: string };
+  const { agendaId, date, propertyId } = req.data as { agendaId?: string; date?: string; propertyId?: string };
   if (!agendaId || !date || !DATE_RE.test(date)) throw new HttpsError("invalid-argument", "Faltan agendaId o date");
   const agenda = await getAgenda(uid, agendaId);
   if (!agenda) throw new HttpsError("not-found", "Agenda no encontrada");
-  // With a car chosen, times when that car already has a test drive are not offered.
-  const slots = await getSlots(uid, agenda, date, Date.now(), vehicleId || null);
-  return { timezone: agenda.timezone, slots: slots.map((s) => ({ ...s, label: formatSlot(s.start, agenda.timezone) })) };
+  // With a property chosen, times when that property already has a visit are not offered.
+  const [slots, agents] = await Promise.all([getSlots(uid, agenda, date, Date.now(), propertyId || null), agentsOf(uid, agenda)]);
+  return {
+    timezone: agenda.timezone,
+    // Staffed agenda: `lanes` are agent ids; `agents` names them.
+    agents: agents.map((a) => ({ id: a.id, name: a.name })),
+    slots: slots.map((s) => ({ ...s, label: formatSlot(s.start, agenda.timezone) })),
+  };
 });
 
 /**
  * Booking from the Agenda page / "Agendar" modal. The booking is linked to a client: the chosen one,
  * the one with that WhatsApp, or a new manual client (created only once the slot is secured).
  */
-export const alBookSlot = onCall(async (req) => {
+export const kfBookSlot = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
-  const { agendaId, date, time, customer, notes, vehicleId, lane } = req.data as {
+  const { agendaId, date, time, customer, notes, propertyId, lane, assigneeId } = req.data as {
     agendaId?: string;
     date?: string;
     time?: string;
     customer?: BookingClientInput;
     notes?: string;
-    vehicleId?: string;
+    propertyId?: string;
     lane?: string;
+    assigneeId?: string;
   };
   if (!agendaId || !date || !DATE_RE.test(date) || !time || !TIME_RE.test(time)) throw new HttpsError("invalid-argument", "Datos de reserva incompletos");
   if (!customer?.clientId && !customer?.firstName?.trim()) throw new HttpsError("invalid-argument", "Indica el nombre del cliente");
-  let vehicle: BookingVehicle | null = null;
-  if (vehicleId) {
-    const v = await bookingVehicle(uid, vehicleId);
+  let property: BookingProperty | null = null;
+  if (propertyId) {
+    const v = await bookingProperty(uid, propertyId);
     if ("error" in v) throw new HttpsError("invalid-argument", v.error);
-    vehicle = v;
+    property = v;
   }
   const client = await findBookingClient(uid, customer).catch((e: Error) => {
     throw new HttpsError("invalid-argument", e.message);
@@ -389,9 +533,10 @@ export const alBookSlot = onCall(async (req) => {
       source: "admin",
       notes: notes?.trim().slice(0, 1000),
       lane: typeof lane === "string" && LANE_NAMES.includes(lane) && lane.length === 1 ? lane : undefined,
-      vehicle,
+      assigneeId: typeof assigneeId === "string" && assigneeId ? assigneeId.slice(0, 100) : undefined,
+      property,
     });
-    await saveBookingClient(uid, client, [booking.service, vehicle?.title, booking.label].filter(Boolean).join(" · "));
+    await saveBookingClient(uid, client, [booking.service, property?.title, booking.label].filter(Boolean).join(" · "));
     return { ...booking, client: { id: client.ref.id, name: client.name, created: client.created } };
   } catch (e) {
     if (e instanceof SlotTakenError) throw new HttpsError("already-exists", "Ese horario ya no está disponible");
@@ -399,7 +544,7 @@ export const alBookSlot = onCall(async (req) => {
   }
 });
 
-export const alConfirmBooking = onCall(async (req) => {
+export const kfConfirmBooking = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
   const { bookingId } = req.data as { bookingId?: string };
   if (!bookingId) throw new HttpsError("invalid-argument", "Falta bookingId");
@@ -407,7 +552,7 @@ export const alConfirmBooking = onCall(async (req) => {
   return { ok: true };
 });
 
-export const alCancelBooking = onCall(async (req) => {
+export const kfCancelBooking = onCall(async (req) => {
   const uid = await workspaceOf(req, "agenda.book");
   const { bookingId } = req.data as { bookingId?: string };
   if (!bookingId) throw new HttpsError("invalid-argument", "Falta bookingId");
@@ -416,7 +561,7 @@ export const alCancelBooking = onCall(async (req) => {
 });
 
 /** Frees expired holds (drafts nobody sent). Availability already ignores them; this tidies the data. */
-export const alExpireHolds = onSchedule("every 60 minutes", async () => {
+export const kfExpireHolds = onSchedule("every 60 minutes", async () => {
   const now = Date.now();
   const tenants = await db().collection(tenantsCol()).get();
   let n = 0;
@@ -431,12 +576,12 @@ export const alExpireHolds = onSchedule("every 60 minutes", async () => {
   if (n) logger.info("holds expired", { n });
 });
 
-// ---------- public quote page (/c/{token}): test drives without login ----------
+// ---------- public quote page (/c/{token}): visits without login ----------
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
-/** Token → quote, rejecting unknown, expired or wrong-car requests. The token is the only credential. */
-async function quoteForBooking(token: unknown, vehicleId: unknown) {
+/** Token → quote, rejecting unknown, expired or wrong-property requests. The token is the only credential. */
+async function quoteForBooking(token: unknown, propertyId: unknown) {
   if (typeof token !== "string" || !TOKEN_RE.test(token)) throw new HttpsError("not-found", "Cotización no encontrada");
   const idx = await db().doc(quoteTokenDoc(token)).get();
   const uid = idx.get("uid") as string | undefined;
@@ -447,38 +592,38 @@ async function quoteForBooking(token: unknown, vehicleId: unknown) {
   if (!q.exists) throw new HttpsError("not-found", "Cotización no encontrada");
   const created = (q.get("createdAt") as Timestamp | null)?.toMillis() ?? 0;
   if (created + (Number(q.get("validDays")) || 7) * 86_400_000 < Date.now()) throw new HttpsError("failed-precondition", "La cotización ya venció; escríbenos por WhatsApp");
-  const vehicles = (q.get("vehicles") ?? []) as { id: string }[];
-  if (typeof vehicleId !== "string" || !vehicles.some((v) => v.id === vehicleId)) throw new HttpsError("invalid-argument", "Ese auto no está en la cotización");
+  const properties = (q.get("properties") ?? []) as { id: string }[];
+  if (typeof propertyId !== "string" || !properties.some((v) => v.id === propertyId)) throw new HttpsError("invalid-argument", "Ese inmueble no está en la cotización");
   const agendas = await listAgendas(uid);
-  const agenda = agendas.find((a) => a.vehicleRequired);
-  if (!agenda) throw new HttpsError("failed-precondition", "No hay agenda de pruebas de manejo");
-  return { uid, quoteId, ref, q, agenda, vehicleId };
+  const agenda = agendas.find((a) => a.propertyRequired);
+  if (!agenda) throw new HttpsError("failed-precondition", "No hay agenda de visitas");
+  return { uid, quoteId, ref, q, agenda, propertyId };
 }
 
-export const alQuoteSlots = onCall(async (req) => {
-  const { token, vehicleId, date } = (req.data ?? {}) as { token?: string; vehicleId?: string; date?: string };
+export const kfQuoteSlots = onCall(async (req) => {
+  const { token, propertyId, date } = (req.data ?? {}) as { token?: string; propertyId?: string; date?: string };
   if (!date || !DATE_RE.test(date)) throw new HttpsError("invalid-argument", "Fecha no válida");
-  const { uid, agenda } = await quoteForBooking(token, vehicleId);
-  const slots = await getSlots(uid, agenda, date, Date.now(), vehicleId);
+  const { uid, agenda } = await quoteForBooking(token, propertyId);
+  const slots = await getSlots(uid, agenda, date, Date.now(), propertyId);
   return { timezone: agenda.timezone, slots: slots.map((s) => ({ time: s.time, label: formatSlot(s.start, agenda.timezone) })) };
 });
 
-/** One active test drive per quote; the booking is confirmed and the seller gets a follow-up. */
-export const alQuoteBook = onCall(async (req) => {
-  const { token, vehicleId, date, time, name, whatsapp } = (req.data ?? {}) as Record<string, string | undefined>;
+/** One active visit per quote; the booking is confirmed and the seller gets a follow-up. */
+export const kfQuoteBook = onCall(async (req) => {
+  const { token, propertyId, date, time, name, whatsapp } = (req.data ?? {}) as Record<string, string | undefined>;
   if (!date || !DATE_RE.test(date) || !time || !TIME_RE.test(time)) throw new HttpsError("invalid-argument", "Elige día y hora");
   if (!name?.trim()) throw new HttpsError("invalid-argument", "Indica tu nombre");
-  const { uid, quoteId, ref, q, agenda } = await quoteForBooking(token, vehicleId);
+  const { uid, quoteId, ref, q, agenda } = await quoteForBooking(token, propertyId);
   // Empty = the WhatsApp saved with the quote (the page only shows its last digits).
   const phone = (whatsapp ?? "").trim() || ((q.get("clientWhatsapp") as string | undefined) ?? "");
   if (phone.replace(/\D/g, "").length < 8) throw new HttpsError("invalid-argument", "Indica tu WhatsApp");
   const prev = q.get("bookingId") as string | null;
   if (prev) {
     const b = await db().collection(bookingsCol(uid)).doc(prev).get();
-    if (["held", "confirmed"].includes(b.get("status"))) throw new HttpsError("already-exists", "Ya tienes una prueba de manejo agendada con esta cotización");
+    if (["held", "confirmed"].includes(b.get("status"))) throw new HttpsError("already-exists", "Ya tienes una visita agendada con esta cotización");
   }
-  const vehicle = await bookingVehicle(uid, vehicleId);
-  if ("error" in vehicle) throw new HttpsError("failed-precondition", vehicle.error);
+  const property = await bookingProperty(uid, propertyId);
+  if ("error" in property) throw new HttpsError("failed-precondition", property.error);
   const [firstName, ...rest] = name.trim().split(/\s+/);
   const clientId = (q.get("clientId") as string | null) ?? undefined;
   const client = await findBookingClient(uid, { clientId, firstName, lastName: rest.join(" "), whatsapp: phone }).catch((e: Error) => {
@@ -491,17 +636,18 @@ export const alQuoteBook = onCall(async (req) => {
       channel: { kind: "quote", quoteId },
       source: "admin",
       notes: `Agendada por el cliente desde la cotización ${q.get("folio")}`,
-      vehicle,
+      property,
+      preferAssigneeIds: [(q.get("sellerId") as string | null) ?? ""].filter(Boolean),
     });
-    await saveBookingClient(uid, client, [booking.service, vehicle.title, booking.label].filter(Boolean).join(" · "));
+    await saveBookingClient(uid, client, [booking.service, property.title, booking.label].filter(Boolean).join(" · "));
     await ref.update({ bookingId: booking.id });
     await db().doc(taskDoc(uid, `quote_booking_${quoteId}_${booking.id}`)).set({
-      title: `${client.name} agendó ${booking.service.toLowerCase()} del ${vehicle.title}: ${booking.label}`,
+      title: `${client.name} agendó ${booking.service.toLowerCase()} del ${property.title}: ${booking.label}`,
       dueAt: Timestamp.fromMillis(booking.start),
-      assigneeId: (q.get("sellerId") as string | null) ?? null,
+      assigneeId: booking.assigneeId ?? (q.get("sellerId") as string | null) ?? null,
       clientId: client.ref.id,
       dealId: (q.get("dealId") as string | null) ?? null,
-      vehicleId: vehicle.id,
+      propertyId: property.id,
       conversationId: (q.get("conversationId") as string | null) ?? null,
       kind: "quote_booking",
       done: false,
@@ -509,7 +655,7 @@ export const alQuoteBook = onCall(async (req) => {
       notes: "",
       createdAt: FieldValue.serverTimestamp(),
     });
-    return { label: booking.label, lane: booking.lane };
+    return { label: booking.label, lane: booking.lane, agent: booking.assigneeName };
   } catch (e) {
     if (e instanceof SlotTakenError) throw new HttpsError("already-exists", "Ese horario se acaba de ocupar; elige otro");
     throw e;

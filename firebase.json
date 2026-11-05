@@ -3,10 +3,13 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "functions": [
     {
       "source": "functions",
-      "codebase": "app-autolix",
+      "codebase": "kafona",
       "ignore": [
         "node_modules",
         ".git",
@@ -19,7 +22,7 @@
   ],
   "hosting": [
     {
-      "site": "app-autolix",
+      "site": "kasita-crm",
       "source": "web",
       "frameworksBackend": {
         "region": "us-central1",
@@ -30,21 +33,5 @@
         "memory": "512MiB"
       }
     }
-  ],
-  "emulators": {
-    "auth": {
-      "port": 9099
-    },
-    "firestore": {
-      "port": 8080
-    },
-    "functions": {
-      "port": 5001
-    },
-    "ui": {
-      "enabled": true,
-      "port": 4000
-    },
-    "singleProjectMode": true
-  }
+  ]
 }

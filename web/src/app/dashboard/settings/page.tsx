@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Bot, Building2, CalendarClock, ImageIcon, Share2, UserRound, UsersRound } from "lucide-react";
+import { Bot, Building2, ImageIcon, Share2, UserRound, UsersRound } from "lucide-react";
 import { AiAgentCard } from "@/components/settings/ai-agent-card";
 import { KnowledgeCard } from "@/components/settings/knowledge-card";
 import { FollowUpCard } from "@/components/settings/followup-card";
@@ -10,6 +10,7 @@ import { ImagesCard } from "@/components/settings/images-card";
 import { AgendasCard } from "@/components/settings/agendas-card";
 import { AccountsCard } from "@/components/settings/accounts-card";
 import { ProfileCard } from "@/components/settings/profile-card";
+import { AvailabilityCard } from "@/components/settings/availability-card";
 import { CompanyCard } from "@/components/settings/company-card";
 import { QuoteSettingsCard } from "@/components/settings/quote-settings-card";
 import { UserCard } from "@/components/settings/user-card";
@@ -22,12 +23,11 @@ const TABS = [
   { id: "empresa", label: "Empresa", icon: Building2, perm: "settings.empresa" },
   { id: "usuarios", label: "Usuarios", icon: UsersRound, perm: "settings.usuarios" },
   { id: "redes", label: "Redes", icon: Share2, perm: "settings.redes" },
-  { id: "agendas", label: "Agendas", icon: CalendarClock, perm: "settings.agendas" },
   { id: "agente", label: "Agente IA", icon: Bot, perm: "settings.agente" },
   { id: "imagenes", label: "Imágenes", icon: ImageIcon, perm: "settings.imagenes" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
-const ALIASES: Record<string, TabId> = { cuentas: "redes", usuario: "perfil" }; // old links
+const ALIASES: Record<string, TabId> = { cuentas: "redes", usuario: "perfil", agendas: "perfil" }; // old links
 
 // The active tab lives in the URL hash so links like /dashboard/settings#redes open it directly.
 const subscribe = (cb: () => void) => {
@@ -65,6 +65,12 @@ export default function SettingsPage() {
         </div>
         <TabsContent value="perfil" className="space-y-4">
           <ProfileCard />
+          <AvailabilityCard />
+          {can("settings.agendas") && (
+            <div id="agendas">
+              <AgendasCard />
+            </div>
+          )}
           <UserCard />
         </TabsContent>
         <TabsContent value="empresa" className="space-y-4">
@@ -76,9 +82,6 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="redes">
           <AccountsCard />
-        </TabsContent>
-        <TabsContent value="agendas">
-          <AgendasCard />
         </TabsContent>
         <TabsContent value="agente" className="space-y-4">
           <AiAgentCard />

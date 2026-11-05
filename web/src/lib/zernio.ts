@@ -66,10 +66,20 @@ export async function getProfileForUser(uid: string, email?: string | null): Pro
   const existing = snap.get("zernioProfileId") as string | undefined;
   if (existing) return existing;
 
-  const { profile } = await zernio<{ profile: { _id: string } }>(uid, "/profiles", {
-    method: "POST",
-    body: { name: email || uid, externalId: uid },
-  });
+  let profile: { _id: string };
+  try {
+    ({ profile } = await zernio<{ profile: { _id: string } }>(uid, "/profiles", {
+      method: "POST",
+      body: { name: email || uid, externalId: uid },
+    }));
+  } catch (err) {
+    // The profile already exists in Zernio (e.g. concurrent first request, or the
+    // Firestore link was lost) — recover it instead of failing.
+    if (!(err instanceof ZernioError) || !/already exists/i.test(err.message)) throw err;
+    const found = await findProfileByExternalId(uid);
+    if (!found) throw err;
+    profile = found;
+  }
 
   const batch = adminDb.batch();
   batch.set(
@@ -80,6 +90,18 @@ export async function getProfileForUser(uid: string, email?: string | null): Pro
   batch.set(adminDb.doc(zernioProfileIndex(profile._id)), { uid });
   await batch.commit();
   return profile._id;
+}
+
+type ZernioProfile = { _id: string; externalId?: string };
+
+async function findProfileByExternalId(uid: string): Promise<{ _id: string } | null> {
+  const data = await zernio<{ profiles?: ZernioProfile[]; data?: ZernioProfile[] } | ZernioProfile[]>(
+    uid,
+    "/profiles",
+    { query: { externalId: uid } },
+  );
+  const list = Array.isArray(data) ? data : (data?.profiles ?? data?.data ?? []);
+  return list.find((p) => p.externalId === uid) ?? null;
 }
 
 /** Indexes accounts → uid so webhooks that only carry an accountId can be routed. */

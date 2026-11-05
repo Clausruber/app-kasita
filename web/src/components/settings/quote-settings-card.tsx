@@ -6,18 +6,17 @@ import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { TERM_OPTIONS, monthlyPayment, type QuoteDefaults } from "@/lib/quote-math";
-import { money } from "@/lib/vehicle-catalog";
+import { TERM_OPTIONS, monthlyPayment, termLabel, type QuoteDefaults } from "@/lib/quote-math";
+import { money } from "@/lib/property-catalog";
 import { useQuoteDefaults } from "@/components/quotes/catalog-drawer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-const EXAMPLE = 300_000; // price used for the sample payment
+const EXAMPLE = 3_000_000; // price used for the sample payment
 
 /** Ajustes → Empresa → Cotizaciones: defaults of the catalog drawer and the PDF conditions. */
 export function QuoteSettingsCard() {
@@ -30,7 +29,7 @@ export function QuoteSettingsCard() {
   if (!form) return null;
   const set = <K extends keyof QuoteDefaults>(k: K, v: QuoteDefaults[K]) => setDraft({ ...form, [k]: v });
   const mid = form.terms[Math.floor((form.terms.length - 1) / 2)];
-  const sample = mid ? monthlyPayment(EXAMPLE * (1 - form.minDownPct / 100), form.rate, mid, form.ivaOnInterest) : 0;
+  const sample = mid ? monthlyPayment(EXAMPLE * (1 - form.minDownPct / 100), form.rate, mid) : 0;
 
   async function save() {
     if (!form) return;
@@ -52,7 +51,7 @@ export function QuoteSettingsCard() {
         <CardTitle className="flex items-center gap-2">
           <FileText className="size-5" /> Cotizaciones
         </CardTitle>
-        <CardDescription>Valores con los que arranca el catálogo/cotización en PDF; el vendedor puede cambiarlos en cada uno.</CardDescription>
+        <CardDescription>Valores del simulador de crédito hipotecario del catálogo/cotización en PDF; el asesor puede cambiarlos en cada uno.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -70,7 +69,7 @@ export function QuoteSettingsCard() {
           </div>
         </div>
         <div className="space-y-1">
-          <Label>Plazos (meses)</Label>
+          <Label>Plazos</Label>
           <div className="flex flex-wrap gap-1.5">
             {TERM_OPTIONS.map((t) => {
               const on = form.terms.includes(t);
@@ -81,19 +80,16 @@ export function QuoteSettingsCard() {
                   onClick={() => set("terms", on ? form.terms.filter((x) => x !== t) : [...form.terms, t].sort((a, b) => a - b))}
                   className={cn("rounded-md border px-2.5 py-1 text-sm", on ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
                 >
-                  {t}
+                  {termLabel(t)}
                 </button>
               );
             })}
           </div>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={form.ivaOnInterest} onCheckedChange={(c) => set("ivaOnInterest", c === true)} /> Cobrar IVA (16 %) sobre los intereses
-        </label>
         {mid && (
           <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-            Ejemplo: un auto de {money(EXAMPLE)} con {form.minDownPct}% de enganche queda en <strong className="text-foreground">{money(sample)}</strong> al mes a {mid}{" "}
-            meses.
+            Ejemplo: una propiedad de {money(EXAMPLE)} con {form.minDownPct}% de enganche queda en <strong className="text-foreground">{money(sample)}</strong> al
+            mes a {termLabel(mid)}.
           </p>
         )}
         <div className="space-y-1">

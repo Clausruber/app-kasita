@@ -6,16 +6,16 @@ import { es } from "date-fns/locale";
 import { toast } from "sonner";
 import { Lock, LockOpen } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Vehicle, VehicleHold } from "@/lib/types";
+import type { Property, PropertyHold } from "@/lib/types";
 import { useCan, useMe } from "@/hooks/use-me";
-import { usePutVehicleCache } from "@/hooks/use-vehicles";
+import { usePutPropertyCache } from "@/hooks/use-properties";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-const HOURS = [2, 4, 24, 48, 72] as const; // same options as api/vehicles/[id]/hold
+const HOURS = [2, 4, 24, 48, 72] as const; // same options as api/properties/[id]/hold
 
 /** "hasta 17:00", "hasta mañana 10:00", "hasta vie 7 nov 10:00". */
 export function holdUntil(iso: string) {
@@ -24,13 +24,13 @@ export function holdUntil(iso: string) {
   return isToday(d) ? `hasta ${time}` : isTomorrow(d) ? `hasta mañana ${time}` : `hasta ${format(d, "EEE d MMM", { locale: es })} ${time}`;
 }
 
-export function useIsMyHold(hold: VehicleHold | null | undefined) {
+export function useIsMyHold(hold: PropertyHold | null | undefined) {
   const me = useMe().data?.sellerId;
   return !!hold && !!me && hold.byId === me;
 }
 
 /** 🔒 "Laura · hasta 17:00" (highlighted when it is yours). */
-export function HoldBadge({ hold, className }: { hold: VehicleHold; className?: string }) {
+export function HoldBadge({ hold, className }: { hold: PropertyHold; className?: string }) {
   const mine = useIsMyHold(hold);
   return (
     <span
@@ -46,33 +46,33 @@ export function HoldBadge({ hold, className }: { hold: VehicleHold; className?: 
   );
 }
 
-/** Inline notice where the car is used (quote, sale): someone else is working it. Blocks nothing. */
-export function HoldWarning({ hold }: { hold: VehicleHold | null | undefined }) {
+/** Inline notice where the property is used (quote, closing): someone else is working it. Blocks nothing. */
+export function HoldWarning({ hold }: { hold: PropertyHold | null | undefined }) {
   const mine = useIsMyHold(hold);
   if (!hold || mine) return null;
   return (
     <p className="text-[11px] text-amber-700 dark:text-amber-300">
-      ⚠️ Bloqueado por {hold.byName || "otro vendedor"} {holdUntil(hold.until)}
+      ⚠️ Bloqueado por {hold.byName || "otro asesor"} {holdUntil(hold.until)}
       {hold.note ? ` · ${hold.note}` : ""}
     </p>
   );
 }
 
-/** "Bloquear" / "Extender" + "Liberar" for a car (card and sheet). */
-export function HoldButtons({ vehicle, size = "sm" }: { vehicle: Vehicle; size?: "sm" | "xs" }) {
+/** "Bloquear" / "Extender" + "Liberar" for a property (card and sheet). */
+export function HoldButtons({ property, size = "sm" }: { property: Property; size?: "sm" | "xs" }) {
   const can = useCan();
-  const putCache = usePutVehicleCache();
-  const mine = useIsMyHold(vehicle.hold);
+  const putCache = usePutPropertyCache();
+  const mine = useIsMyHold(property.hold);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  if (!can("inventory") || !["disponible", "apartado"].includes(vehicle.status)) return null;
-  const canRelease = !!vehicle.hold && (mine || can("inventory.edit"));
+  if (!can("inventory") || !["disponible", "apartado"].includes(property.status)) return null;
+  const canRelease = !!property.hold && (mine || can("inventory.edit"));
 
   async function release() {
     setBusy(true);
     try {
-      const r = await api<{ vehicle: Vehicle }>(`/api/vehicles/${vehicle.id}/hold`, { method: "DELETE" });
-      putCache(r.vehicle);
+      const r = await api<{ property: Property }>(`/api/properties/${property.id}/hold`, { method: "DELETE" });
+      putCache(r.property);
       toast.success("Bloqueo liberado");
     } catch (e) {
       toast.error((e as Error).message);
@@ -91,16 +91,16 @@ export function HoldButtons({ vehicle, size = "sm" }: { vehicle: Vehicle; size?:
           <LockOpen /> Liberar
         </Button>
       )}
-      {open && <HoldDialog vehicle={vehicle} onClose={() => setOpen(false)} />}
+      {open && <HoldDialog property={property} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function HoldDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
-  const putCache = usePutVehicleCache();
-  const mine = useIsMyHold(vehicle.hold);
+function HoldDialog({ property, onClose }: { property: Property; onClose: () => void }) {
+  const putCache = usePutPropertyCache();
+  const mine = useIsMyHold(property.hold);
   const [hours, setHours] = useState<(typeof HOURS)[number]>(4);
-  const [note, setNote] = useState(mine ? (vehicle.hold?.note ?? "") : "");
+  const [note, setNote] = useState(mine ? (property.hold?.note ?? "") : "");
   const [busy, setBusy] = useState(false);
   // When the dialog opened: reference for the "vence" preview (render must stay pure).
   const [openedAt] = useState(() => Date.now());
@@ -108,9 +108,9 @@ function HoldDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => voi
   async function save() {
     setBusy(true);
     try {
-      const r = await api<{ vehicle: Vehicle; previous: VehicleHold | null }>(`/api/vehicles/${vehicle.id}/hold`, { method: "POST", body: { hours, note } });
-      putCache(r.vehicle);
-      toast.success(r.previous ? `Bloqueado; reemplazaste el bloqueo de ${r.previous.byName}` : `Bloqueado ${r.vehicle.hold ? holdUntil(r.vehicle.hold.until) : ""}`);
+      const r = await api<{ property: Property; previous: PropertyHold | null }>(`/api/properties/${property.id}/hold`, { method: "POST", body: { hours, note } });
+      putCache(r.property);
+      toast.success(r.previous ? `Bloqueado; reemplazaste el bloqueo de ${r.previous.byName}` : `Bloqueado ${r.property.hold ? holdUntil(r.property.hold.until) : ""}`);
       onClose();
     } catch (e) {
       toast.error((e as Error).message);
@@ -123,14 +123,14 @@ function HoldDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => voi
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>{mine ? "Extender bloqueo" : "Bloquear auto"}</DialogTitle>
+          <DialogTitle>{mine ? "Extender bloqueo" : "Bloquear propiedad"}</DialogTitle>
           <DialogDescription>
-            {vehicle.title || `${vehicle.brand} ${vehicle.model}`}: avisa al equipo que lo estás trabajando. No impide que otros lo coticen o vendan.
+            {property.title || property.propertyType}: avisa al equipo que la estás mostrando. No impide que otros la coticen o cierren.
           </DialogDescription>
         </DialogHeader>
-        {vehicle.hold && !mine && (
+        {property.hold && !mine && (
           <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
-            Ya lo tiene {vehicle.hold.byName} {holdUntil(vehicle.hold.until)}. Si continúas, reemplazas su bloqueo.
+            Ya lo tiene {property.hold.byName} {holdUntil(property.hold.until)}. Si continúas, reemplazas su bloqueo.
           </p>
         )}
         <div className="space-y-1">
@@ -151,7 +151,7 @@ function HoldDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => voi
         </div>
         <div className="space-y-1">
           <Label htmlFor="hold-note">Nota (opcional)</Label>
-          <Input id="hold-note" maxLength={200} placeholder="Cliente viene a verlo a las 4" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input id="hold-note" maxLength={200} placeholder="Cliente viene a verla a las 4" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

@@ -6,6 +6,7 @@ import { HttpError } from "@/lib/auth-guard";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { inviteDoc, memberDoc, memberIndexDoc, membersCol } from "@/lib/firebase/paths";
 import { ROLE_PRESETS, TEAM_ROLES, type TeamRole, normalisePerms } from "@/lib/permissions";
+import type { Availability } from "@/lib/types";
 
 export const INVITE_DAYS = 7;
 const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -25,6 +26,7 @@ export type MemberRow = {
   inviteExpiresAt: string | null;
   createdAt: string | null;
   acceptedAt: string | null;
+  availability: Availability | null; // own visit hours (staffed agendas)
 };
 
 const iso = (v: unknown) => (v instanceof Timestamp ? v.toDate().toISOString() : null);
@@ -42,6 +44,7 @@ export const toMemberRow = (id: string, d: FirebaseFirestore.DocumentData): Memb
   inviteExpiresAt: iso(d.inviteExpiresAt),
   createdAt: iso(d.createdAt),
   acceptedAt: iso(d.acceptedAt),
+  availability: d.availability ? { weekly: d.availability.weekly ?? null, blockedDates: d.availability.blockedDates ?? [] } : null,
 });
 
 export function parseRole(v: unknown): TeamRole {

@@ -1,77 +1,77 @@
-  // ===== Autolix (app-autolix-prod) =====
+  // ===== Kasita (kafona-data) =====
   match /databases/{database}/documents {
-    function alSignedIn() { return request.auth != null; }
-    function alOnlyChanges(fields) {
+    function kfSignedIn() { return request.auth != null; }
+    function kfOnlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
     // Team member of workspace `ws`: the server-only index written when the invitation was accepted
     // (rules can read it even though clients cannot). Inactive members lose access at once.
-    function alMemberOf(ws) {
-      let idx = /databases/$(database)/documents/app-autolix-prod/_system/members/$(request.auth.uid);
+    function kfMemberOf(ws) {
+      let idx = /databases/$(database)/documents/kafona-data/_system/members/$(request.auth.uid);
       return exists(idx) && get(idx).data.ownerUid == ws && get(idx).data.status == 'active';
     }
 
     // Server-only routing indexes (Admin SDK bypasses rules).
-    match /app-autolix-prod/_system/{document=**} {
+    match /kafona-data/_system/{document=**} {
       allow read, write: if false;
     }
 
-    match /app-autolix-prod/{uid} {
+    match /kafona-data/{uid} {
       // Owner of the workspace, or an active member of its team.
-      function alIsOwner() { return alSignedIn() && (request.auth.uid == uid || alMemberOf(uid)); }
+      function kfIsOwner() { return kfSignedIn() && (request.auth.uid == uid || kfMemberOf(uid)); }
 
-      allow read: if alIsOwner();
-      allow update: if alSignedIn() && request.auth.uid == uid && alOnlyChanges(['displayName', 'timezone']);
+      allow read: if kfIsOwner();
+      allow update: if kfSignedIn() && request.auth.uid == uid && kfOnlyChanges(['displayName', 'timezone']);
 
       match /accounts/{accountId} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
       }
 
       match /posts/{postId} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
         // Clients may only clear unread counters; everything else goes through the API/functions.
-        allow update: if alIsOwner() && alOnlyChanges(['unreadCount']);
+        allow update: if kfIsOwner() && kfOnlyChanges(['unreadCount']);
 
-        match /alMessages/{messageId} {
-          allow read: if alIsOwner();
-          allow update: if alIsOwner() && alOnlyChanges(['read']);
+        match /kfMessages/{messageId} {
+          allow read: if kfIsOwner();
+          allow update: if kfIsOwner() && kfOnlyChanges(['read']);
         }
       }
 
       // Service agendas and bookings: read-only for the owner; writes go through the API/functions
       // (bookings use a transaction on agendas/{id}/days/{date} so a slot is never given twice).
       match /agendas/{agendaId}/{document=**} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
       }
       match /agendas/{agendaId} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
       }
       match /bookings/{bookingId} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
       }
       // Follow-ups: read live for the sidebar badge; writes go through the API / scheduler.
       // Inventory, deals and sales are only read through the API (VIN/plates and per-seller filtering).
       match /tasks/{taskId} {
-        allow read: if alIsOwner();
+        allow read: if kfIsOwner();
       }
 
       match /conversations/{convId} {
-        allow read: if alIsOwner();
-        allow update: if alIsOwner() && alOnlyChanges(['unreadCount']);
+        allow read: if kfIsOwner();
+        allow update: if kfIsOwner() && kfOnlyChanges(['unreadCount']);
 
-        match /alMessages/{messageId} {
-          allow read: if alIsOwner();
-          allow update: if alIsOwner() && alOnlyChanges(['read']);
+        match /kfMessages/{messageId} {
+          allow read: if kfIsOwner();
+          allow update: if kfIsOwner() && kfOnlyChanges(['read']);
         }
       }
     }
 
     // Unified inbox: collectionGroup('messages') where uid == workspace.
     // `kind` limits it to this app's docs, so other apps' `messages` subcollections are not opened up.
-    match /{path=**}/alMessages/{messageId} {
-      allow read: if alSignedIn()
+    match /{path=**}/kfMessages/{messageId} {
+      allow read: if kfSignedIn()
         && resource.data.kind in ['comment', 'dm']
-        && (resource.data.uid == request.auth.uid || alMemberOf(resource.data.uid));
+        && (resource.data.uid == request.auth.uid || kfMemberOf(resource.data.uid));
     }
   }
-  // ===== fin Autolix =====
+  // ===== fin Kasita =====

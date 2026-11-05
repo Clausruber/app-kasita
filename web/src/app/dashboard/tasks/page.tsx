@@ -5,7 +5,7 @@ import Link from "next/link";
 import { format, isToday, isTomorrow } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
-import { Bell, Car, Clock, KanbanSquare, MessageCircle, Plus, Trash2, UserRound } from "lucide-react";
+import { Bell, Building2, Clock, KanbanSquare, MessageCircle, Plus, Trash2, UserRound } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Task } from "@/lib/types";
 import { useCan } from "@/hooks/use-me";
@@ -23,8 +23,10 @@ const KIND_LABEL: Record<Task["kind"], string | null> = {
   reservation_expiry: "Apartado por vencer",
   quote_viewed: "Cotización vista",
   quote_accepted: "Cotización aceptada",
-  quote_booking: "Prueba de manejo agendada",
+  quote_booking: "Visita agendada",
   hold_expiry: "Bloqueo por vencer",
+  lease_end: "Fin de contrato de renta",
+  booking: "Visita asignada",
 };
 
 const when = (iso: string) => {
@@ -64,9 +66,9 @@ function TaskRow({ task, now, seller, onEdit, onToggle, onDelete }: { task: Task
               <KanbanSquare className="size-3" /> Oportunidad
             </Link>
           )}
-          {task.vehicleId && (
-            <Link href={`/dashboard/inventory/${task.vehicleId}`} className="flex items-center gap-1 hover:text-foreground">
-              <Car className="size-3" /> Auto
+          {task.propertyId && (
+            <Link href={`/dashboard/inventory/${task.propertyId}`} className="flex items-center gap-1 hover:text-foreground">
+              <Building2 className="size-3" /> Propiedad
             </Link>
           )}
           {task.conversationId && (

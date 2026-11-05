@@ -6,7 +6,7 @@ import { reserveDeal, toDealRow } from "@/lib/deals-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// Apartado: the vehicle leaves the available stock until it is sold or released.
+// Apartado: the property leaves the available stock until it is sold or released.
 export const POST = withPerm<Ctx>("deals.reserve", async (req, user, { params }) => {
   const { id } = await params;
   await reserveDeal(user.uid, user, id, await req.json());

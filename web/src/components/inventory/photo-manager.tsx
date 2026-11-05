@@ -4,9 +4,9 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, ImagePlus, Star, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { MAX_PHOTOS } from "@/lib/vehicle-catalog";
-import { uploadVehiclePhoto } from "@/lib/vehicle-photos";
-import type { Vehicle, VehiclePhoto } from "@/lib/types";
+import { MAX_PHOTOS } from "@/lib/property-catalog";
+import { uploadPropertyPhoto } from "@/lib/property-photos";
+import type { Property, PropertyPhoto } from "@/lib/types";
 import { useCan, useWorkspaceUid } from "@/hooks/use-me";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,17 +14,17 @@ import { cn } from "@/lib/utils";
 type Upload = { name: string; pct: number };
 
 /**
- * Vehicle photos in Firebase Storage: drop or pick several files, reorder (the first is the cover),
+ * Property photos in Firebase Storage: drop or pick several files, reorder (the first is the cover),
  * delete. Files are compressed in the browser before uploading.
  */
-export function PhotoManager({ vehicle, onChange }: { vehicle: Vehicle; onChange: (photos: VehiclePhoto[]) => void }) {
+export function PhotoManager({ property, onChange }: { property: Property; onChange: (photos: PropertyPhoto[]) => void }) {
   const ws = useWorkspaceUid();
   const canEdit = useCan()("inventory.edit");
   const input = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [over, setOver] = useState(false);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const photos = vehicle.photos;
+  const photos = property.photos;
   const room = MAX_PHOTOS - photos.length - uploads.length;
 
   async function addFiles(list: FileList | File[]) {
@@ -36,10 +36,10 @@ export function PhotoManager({ vehicle, onChange }: { vehicle: Vehicle; onChange
     // Sequential: keeps the chosen order and avoids saturating mobile connections.
     for (const file of batch) {
       try {
-        const photo = await uploadVehiclePhoto(ws, vehicle.id, file, (pct) =>
+        const photo = await uploadPropertyPhoto(ws, property.id, file, (pct) =>
           setUploads((u) => u.map((x) => (x.name === file.name ? { ...x, pct } : x))),
         );
-        const r = await api<{ photos: VehiclePhoto[] }>(`/api/vehicles/${vehicle.id}/photos`, { method: "POST", body: photo });
+        const r = await api<{ photos: PropertyPhoto[] }>(`/api/properties/${property.id}/photos`, { method: "POST", body: photo });
         onChange(r.photos);
       } catch (e) {
         toast.error((e as Error).message);
@@ -49,10 +49,10 @@ export function PhotoManager({ vehicle, onChange }: { vehicle: Vehicle; onChange
     }
   }
 
-  async function reorder(next: VehiclePhoto[]) {
+  async function reorder(next: PropertyPhoto[]) {
     onChange(next); // optimistic
     try {
-      const r = await api<{ photos: VehiclePhoto[] }>(`/api/vehicles/${vehicle.id}/photos`, { method: "PUT", body: { order: next.map((p) => p.path) } });
+      const r = await api<{ photos: PropertyPhoto[] }>(`/api/properties/${property.id}/photos`, { method: "PUT", body: { order: next.map((p) => p.path) } });
       onChange(r.photos);
     } catch (e) {
       onChange(photos);
@@ -67,10 +67,10 @@ export function PhotoManager({ vehicle, onChange }: { vehicle: Vehicle; onChange
     reorder(next);
   };
 
-  async function remove(p: VehiclePhoto) {
+  async function remove(p: PropertyPhoto) {
     if (!confirm("¿Borrar esta foto?")) return;
     try {
-      const r = await api<{ photos: VehiclePhoto[] }>(`/api/vehicles/${vehicle.id}/photos?path=${encodeURIComponent(p.path)}`, { method: "DELETE" });
+      const r = await api<{ photos: PropertyPhoto[] }>(`/api/properties/${property.id}/photos?path=${encodeURIComponent(p.path)}`, { method: "DELETE" });
       onChange(r.photos);
     } catch (e) {
       toast.error((e as Error).message);

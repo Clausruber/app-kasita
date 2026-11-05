@@ -26,7 +26,7 @@ async function safe<T>(p: Promise<T>): Promise<T | null> {
 
 /** Downloads and shrinks every photo (JPEG 1000 px) and the logo (PNG): keeps the PDF small. */
 async function loadAssets(uid: string, q: QuoteDoc, link: string | null): Promise<PdfAssets> {
-  const urls = [...new Set(q.vehicles.flatMap((v) => v.photos))];
+  const urls = [...new Set(q.properties.flatMap((v) => v.photos))];
   const { logoUrl } = await readPostImages(uid);
   const [logo, ...photos] = await Promise.all([
     logoUrl ? safe(download(logoUrl, "Logo").then((b) => sharp(b).resize(LOGO_SIDE, LOGO_SIDE, { fit: "inside", withoutEnlargement: true }).png().toBuffer())) : null,

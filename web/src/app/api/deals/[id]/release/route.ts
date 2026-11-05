@@ -6,7 +6,7 @@ import { releaseDeal, toDealRow } from "@/lib/deals-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// Cancels an apartado: the vehicle is available again and the deal goes back to negotiation.
+// Cancels an apartado: the property is available again and the deal goes back to negotiation.
 export const POST = withPerm<Ctx>("deals.void", async (_req, user, { params }) => {
   const { id } = await params;
   await releaseDeal(user.uid, user, id);

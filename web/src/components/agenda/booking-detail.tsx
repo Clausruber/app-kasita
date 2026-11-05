@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Bot, CalendarCheck, Car, Check, Clock, UserRound, X } from "lucide-react";
+import { Bot, Building2, CalendarCheck, Check, Clock, UserRound, X } from "lucide-react";
 import { platformName } from "@/lib/platforms";
 import type { Booking } from "@/lib/types";
 import { STATUS_LABEL, cancelBookingFn, confirmBookingFn } from "@/components/agenda/agenda-day";
@@ -40,7 +40,7 @@ export function BookingChip({ booking, onClick }: { booking: Booking; onClick: (
         {booking.lane}
       </span>
       <span className="truncate">
-        {booking.vehicle ? booking.vehicle.title : booking.service} · {booking.customer.name}
+        {booking.property ? booking.property.title : booking.service} · {booking.customer.name}
       </span>
     </button>
   );
@@ -81,15 +81,16 @@ export function BookingDetail({ booking, onClose }: { booking: Booking; onClose:
             {booking.customer.platform && <span className="text-muted-foreground">· {platformName(booking.customer.platform)}</span>}
           </p>
           {booking.customer.contact && <p className="text-muted-foreground">WhatsApp: {booking.customer.contact}</p>}
-          {booking.vehicle && (
+          {booking.property && (
             <p className="flex items-center gap-2">
-              <Car className="size-4" />
-              <Link href={`/dashboard/inventory/${booking.vehicle.id}`} className="font-medium hover:underline">
-                {booking.vehicle.title}
+              <Building2 className="size-4" />
+              <Link href={`/dashboard/inventory/${booking.property.id}`} className="font-medium hover:underline">
+                {booking.property.title}
               </Link>
             </p>
           )}
           {booking.lane && <p>Espacio: {booking.lane}</p>}
+          {booking.assigneeName && <p>Atiende: {booking.assigneeName}</p>}
           <p>
             Estado: <span className={cn(booking.status === "held" && "text-amber-700 dark:text-amber-300")}>{STATUS_LABEL[booking.status]}</span>
             {" · "}

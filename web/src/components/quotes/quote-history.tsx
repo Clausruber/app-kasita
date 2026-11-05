@@ -5,7 +5,6 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
-import { money } from "@/lib/vehicle-catalog";
 import { useCan } from "@/hooks/use-me";
 import { QuoteButton } from "@/components/quotes/catalog-drawer";
 import type { QuoteRow } from "@/components/quotes/quote-builder";
@@ -41,7 +40,7 @@ export function QuoteHistory({ clientId, clientName, clientWhatsapp }: { clientI
                 {q.createdAt && <span className="ml-auto text-xs text-muted-foreground">{format(new Date(q.createdAt), "d MMM", { locale: es })}</span>}
               </div>
               <p className="truncate text-xs text-muted-foreground">
-                {q.accepted ? `Quiere: ${q.accepted.vehicleTitle}${q.accepted.months ? ` · ${q.accepted.downPct}% a ${q.accepted.months} meses` : ""}${q.accepted.tradeIn ? ` · a cuenta: ${q.accepted.tradeIn.description || "auto"} (${money(q.accepted.tradeIn.value)})` : ""}` : q.vehicles.map((v) => v.title).join(", ")}
+                {q.accepted ? `Le interesa: ${q.accepted.propertyTitle}${q.accepted.months ? ` · crédito con ${q.accepted.downPct}% a ${q.accepted.months / 12} años` : ""}` : q.properties.map((v) => v.title).join(", ")}
               </p>
               <QuoteLinkActions row={q} size="xs" />
             </li>

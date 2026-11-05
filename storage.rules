@@ -1,24 +1,35 @@
 rules_version = '2';
-// Autolix block only (emulator + reference). In the shared project, paste storage.rules.pegar.txt into the console rules.
+// Storage rules of the kafona project (deployed with `firebase deploy --only storage`).
 service firebase.storage {
   match /b/{bucket}/o {
-    // ===== Autolix (app-autolix-prod): fotos de autos =====
+    // Owner of workspace `uid`, or an active member of its team (server-only index in Firestore).
+    function kfOwner(uid) {
+      return request.auth != null && (
+        request.auth.uid == uid ||
+        (firestore.exists(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)) &&
+         firestore.get(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)).data.ownerUid == uid &&
+         firestore.get(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)).data.status == 'active'));
+    }
+
+    // ===== Kasita (kafona-data): fotos de propiedades =====
     // Lee y sube el dueño de la cuenta o un miembro activo de su equipo; solo imágenes de menos de 10 MB.
     // Los borrados los hace la API con el SDK de admin.
-    match /app-autolix-prod/{uid}/vehicles/{vehicleId}/{file} {
-      function alOwner() {
-        return request.auth != null && (
-          request.auth.uid == uid ||
-          (firestore.exists(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)) &&
-           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.ownerUid == uid &&
-           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.status == 'active'));
-      }
-      allow read: if alOwner();
-      allow create: if alOwner()
+    match /kafona-data/{uid}/properties/{propertyId}/{file} {
+      allow read: if kfOwner(uid);
+      allow create: if kfOwner(uid)
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/(jpeg|png|webp)');
       allow update, delete: if false;
     }
-    // ===== fin Autolix =====
+
+    // Logo de la empresa para las fotos de las publicaciones (Ajustes → Imágenes): PNG de menos de 5 MB.
+    match /kafona-data/{uid}/branding/{file} {
+      allow read: if kfOwner(uid);
+      allow create: if kfOwner(uid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/png');
+      allow update, delete: if false;
+    }
+    // ===== fin Kasita =====
   }
 }

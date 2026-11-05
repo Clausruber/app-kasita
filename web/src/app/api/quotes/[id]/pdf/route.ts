@@ -4,7 +4,7 @@ import { getQuote, quoteFileName, quotePath } from "@/lib/quotes-server";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// Re-renders a saved catalog: the cars were frozen when it was created, so it is the same document.
+// Re-renders a saved catalog: the properties were frozen when it was created, so it is the same document.
 export const GET = withPerm<Ctx>("inventory", async (req, user, { params }) => {
   const { id } = await params;
   const quote = await getQuote(user.uid, id);

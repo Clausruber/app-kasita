@@ -30,7 +30,7 @@ export function AccountsCard() {
   }
 
   async function disconnect(id: string) {
-    if (!confirm("¿Desconectar esta cuenta?")) return;
+    if (!confirm("¿Desconectar esta cuenta? Se borrarán sus publicaciones, comentarios y conversaciones (los clientes se conservan).")) return;
     setBusy(id);
     try {
       await api(`/api/accounts/${id}`, { method: "DELETE" });

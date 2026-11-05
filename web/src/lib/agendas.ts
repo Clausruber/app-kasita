@@ -16,17 +16,9 @@ const int = (v: unknown, min: number, max: number, name: string) => {
   return n;
 };
 
-/** Validates and normalises an agenda sent by the Agenda page (slot logic lives in functions/src/agenda.ts). */
-export function parseAgendaInput(body: Record<string, unknown>) {
-  const service = clip(body.service, 120);
-  if (!service) throw new HttpError(400, "Indica el nombre del servicio");
-  const timezone = clip(body.timezone, 64) || "UTC";
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
-  } catch {
-    throw new HttpError(400, "Zona horaria no válida");
-  }
-  const weeklyIn = (body.weekly ?? {}) as Record<string, { start?: string; end?: string }[]>;
+/** Weekly ranges per day ("HH:mm", sorted, no overlaps). Shared by agendas and agents' own hours. */
+export function parseWeekly(input: unknown) {
+  const weeklyIn = (input ?? {}) as Record<string, { start?: string; end?: string }[]>;
   const weekly: Record<string, { start: string; end: string }[]> = {};
   for (const d of WEEKDAYS) {
     const ranges = (Array.isArray(weeklyIn[d]) ? weeklyIn[d] : []).slice(0, 8).map((r) => {
@@ -38,9 +30,36 @@ export function parseAgendaInput(body: Record<string, unknown>) {
     if (ranges.some((r, i) => i > 0 && toMin(r.start) < toMin(ranges[i - 1].end))) throw new HttpError(400, `Franjas solapadas (${d})`);
     weekly[d] = ranges;
   }
-  const blockedDates = [...new Set((Array.isArray(body.blockedDates) ? body.blockedDates : []).filter((x): x is string => typeof x === "string" && DATE.test(x)))]
-    .sort()
-    .slice(0, 366);
+  return weekly;
+}
+
+export const parseBlockedDates = (input: unknown) =>
+  [...new Set((Array.isArray(input) ? input : []).filter((x): x is string => typeof x === "string" && DATE.test(x)))].sort().slice(0, 366);
+
+/** An agent's availability: own weekly hours (null = follow each agenda's hours) and days off. */
+export function parseAvailability(input: unknown) {
+  const a = (input ?? {}) as { weekly?: unknown; blockedDates?: unknown };
+  return { weekly: a.weekly === null || a.weekly === undefined ? null : parseWeekly(a.weekly), blockedDates: parseBlockedDates(a.blockedDates) };
+}
+
+/** Validates and normalises an agenda sent by the Agenda page (slot logic lives in functions/src/agenda.ts). */
+export function parseAgendaInput(body: Record<string, unknown>) {
+  const service = clip(body.service, 120);
+  if (!service) throw new HttpError(400, "Indica el nombre del servicio");
+  const timezone = clip(body.timezone, 64) || "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+  } catch {
+    throw new HttpError(400, "Zona horaria no válida");
+  }
+  const weekly = parseWeekly(body.weekly);
+  const blockedDates = parseBlockedDates(body.blockedDates);
+  const agents =
+    body.agents === "all"
+      ? "all"
+      : Array.isArray(body.agents) && body.agents.length
+        ? [...new Set(body.agents.filter((x): x is string => typeof x === "string" && !!x && !x.includes("/")))].slice(0, 100)
+        : null;
   return {
     service,
     name: service,
@@ -55,30 +74,36 @@ export function parseAgendaInput(body: Record<string, unknown>) {
     maxDaysAhead: int(body.maxDaysAhead ?? 60, 1, 365, "Los días de antelación"),
     active: body.active !== false,
     lanes: int(body.lanes ?? 1, 1, MAX_LANES, "Los espacios por horario"),
-    vehicleRequired: Boolean(body.vehicleRequired),
+    propertyRequired: Boolean(body.propertyRequired),
+    agents,
   };
 }
 
 export const MAX_LANES = 6; // A–F, same as functions/src/agenda.ts
-export const TEST_DRIVE_AGENDA_ID = "prueba-de-manejo";
+export const VISIT_AGENDA_ID = "visita";
 
 /**
- * Every account starts with a "Prueba de manejo" agenda the admin then adjusts. Created once: the
+ * Every account starts with a "Visita a propiedad" agenda the admin then adjusts. Created once: the
  * flag on the workspace doc keeps it from coming back if the admin deletes it.
  */
-export async function ensureTestDriveAgenda(uid: string) {
+export async function ensureVisitAgenda(uid: string) {
   const userRef = adminDb.doc(userDoc(uid));
-  const agendaRef = adminDb.doc(agendaDoc(uid, TEST_DRIVE_AGENDA_ID));
+  const agendaRef = adminDb.doc(agendaDoc(uid, VISIT_AGENDA_ID));
   await adminDb.runTransaction(async (tx) => {
     const [user, agenda] = await Promise.all([tx.get(userRef), tx.get(agendaRef)]);
-    if (user.get("seeded.testDriveAgenda")) return;
+    // Visit agendas created before agents existed: staff them with the whole team once.
+    if (user.get("seeded.visitAgenda")) {
+      if (!user.get("seeded.visitAgents") && agenda.exists && agenda.get("agents") === undefined) tx.update(agendaRef, { agents: "all" });
+      if (!user.get("seeded.visitAgents")) tx.set(userRef, { seeded: { visitAgents: true } }, { merge: true });
+      return;
+    }
     if (!agenda.exists) {
       const range = (start: string, end: string) => [{ start, end }];
       tx.set(agendaRef, {
-        service: "Prueba de manejo",
-        name: "Prueba de manejo",
-        kind: "test_drive",
-        description: "Prueba de manejo de un auto del inventario. Trae tu licencia de conducir vigente e identificación oficial.",
+        service: "Visita a propiedad",
+        name: "Visita a propiedad",
+        kind: "visit",
+        description: "Recorrido por la propiedad con un asesor. Trae una identificación oficial; la dirección exacta te la compartimos al confirmar.",
         price: "",
         durationMin: 45,
         bufferMin: 15,
@@ -96,12 +121,13 @@ export async function ensureTestDriveAgenda(uid: string) {
         minNoticeMin: 120,
         maxDaysAhead: 30,
         active: true,
-        lanes: 2,
-        vehicleRequired: true,
+        lanes: 1,
+        agents: "all", // every active agent, each with their own hours (Ajustes → Perfil)
+        propertyRequired: true,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
-    tx.set(userRef, { seeded: { testDriveAgenda: true } }, { merge: true });
+    tx.set(userRef, { seeded: { visitAgenda: true, visitAgents: true } }, { merge: true });
   });
 }

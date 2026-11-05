@@ -4,12 +4,13 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, ImagePlus, Send, CalendarClock, Stamp, X } from "lucide-react";
+import { ArrowLeft, Building2, ImagePlus, PenLine, Send, CalendarClock, Stamp, X } from "lucide-react";
 import { api, uploadMedia } from "@/lib/api";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useComposeStore } from "@/stores/compose-store";
 import { usePostImages } from "@/hooks/use-post-images";
 import { PostPreview } from "@/components/posts/post-preview";
+import { PropertyPicker } from "@/components/posts/property-picker";
 import { WatermarkedImage } from "@/components/shared/watermarked-image";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PlatformBadge } from "@/components/shared/platform-badge";
@@ -80,6 +81,7 @@ export default function NewPostPage() {
     }
   }
 
+  const fromInventory = s.source === "inventario";
   const activeAccounts = accounts.filter((a) => a.isActive !== false);
   const canSend = !sending && !uploading && s.accountIds.length > 0 && (s.content.trim() || s.mediaItems.length);
 
@@ -96,6 +98,33 @@ export default function NewPostPage() {
 
       <Card>
         <CardContent className="space-y-4">
+          <div className="inline-flex rounded-lg border p-0.5" role="tablist" aria-label="Origen de la publicación">
+            {(
+              [
+                ["nueva", "Nueva", PenLine],
+                ["inventario", "Inventario", Building2],
+              ] as const
+            ).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={s.source === value}
+                onClick={() => s.setSource(value)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors",
+                  s.source === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                )}
+              >
+                <Icon className="size-4" /> {label}
+              </button>
+            ))}
+          </div>
+
+          {fromInventory && (
+            <PropertyPicker propertyId={s.propertyId} media={s.mediaItems} onPick={s.pickProperty} onMedia={s.setMedia} />
+          )}
+
           <div className="space-y-2">
             <Label>Publicar en</Label>
             {isLoading && <p className="text-sm text-muted-foreground">Cargando cuentas…</p>}
@@ -142,6 +171,7 @@ export default function NewPostPage() {
           </div>
 
           <div className="space-y-2">
+            {!fromInventory && (
             <div className="flex flex-wrap gap-2">
               {s.mediaItems.map((m) => (
                 <div key={m.url} className="relative flex size-24 items-center overflow-hidden rounded-lg border bg-muted">
@@ -161,6 +191,7 @@ export default function NewPostPage() {
                 </div>
               ))}
             </div>
+            )}
             <input
               ref={fileInput}
               type="file"
@@ -173,9 +204,11 @@ export default function NewPostPage() {
               }}
             />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
-                <ImagePlus /> {uploading ? `Subiendo (${uploading})…` : "Añadir imagen o video"}
-              </Button>
+              {!fromInventory && (
+                <Button variant="outline" size="sm" onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
+                  <ImagePlus /> {uploading ? `Subiendo (${uploading})…` : "Añadir imagen o video"}
+                </Button>
+              )}
               <label className={cn("flex items-center gap-2 text-sm", !hasLogo && "text-muted-foreground")}>
                 <Checkbox checked={withLogo} disabled={!hasLogo} onCheckedChange={(c) => s.setWatermark(c === true)} />
                 <Stamp className="size-4" /> Agregar logo

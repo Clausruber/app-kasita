@@ -24,7 +24,7 @@ const activity = (p: Post) => (p.lastCommentAt ?? p.scheduledFor)?.toMillis() ??
 
 /**
  * Inbox in three columns: posts → people who commented → conversation.
- * Everything is read live from Firestore; comments arrive through the alZernioWebhook function
+ * Everything is read live from Firestore; comments arrive through the kfZernioWebhook function
  * and /api/inbox/sync fills in pictures, likes and older comments.
  */
 export default function InboxPage() {

@@ -14,7 +14,7 @@ async function load(uid: string, id: string) {
   return { ref, data: snap.data()! };
 }
 
-// Stage, salesperson, linked client/vehicle, value and notes. Apartado/vendido go through their own endpoints.
+// Stage, salesperson, linked client/property, value and notes. Apartado/vendido go through their own endpoints.
 export const PATCH = withPerm<Ctx>("deals.edit", async (req, user, { params }) => {
   const { id } = await params;
   const { ref, data } = await load(user.uid, id);

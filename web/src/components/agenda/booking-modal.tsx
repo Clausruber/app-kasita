@@ -6,40 +6,46 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CalendarCheck, CircleCheck, UserPlus, UserRound } from "lucide-react";
 import { functions } from "@/lib/firebase/client";
+import { functionsErrorMessage } from "@/lib/functions-error";
 import { useAgendas } from "@/hooks/use-firestore";
-import { useVehicles } from "@/hooks/use-vehicles";
-import { money } from "@/lib/vehicle-catalog";
+import { useProperties } from "@/hooks/use-properties";
+import { priceLine } from "@/lib/property-catalog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateField } from "@/components/shared/date-field";
 import { useCan } from "@/hooks/use-me";
+import { useAgents } from "@/hooks/use-agents";
 
 type Slot = { time: string; label: string; lanes: string[] };
 type Booked = {
   service: string;
   label: string;
   lane: string | null;
-  vehicle: { id: string; title: string } | null;
+  assigneeName: string | null;
+  property: { id: string; title: string } | null;
   client: { id: string; name: string; created: boolean };
 };
 type BookInput = {
   agendaId: string;
   date: string;
   time: string;
-  vehicleId?: string;
+  propertyId?: string;
   lane?: string;
+  assigneeId?: string;
   customer: { clientId?: string; firstName: string; lastName: string; whatsapp: string };
 };
 
-const slotsFn = httpsCallable<{ agendaId: string; date: string; vehicleId?: string }, { slots: Slot[] }>(functions, "alGetSlots");
-const bookFn = httpsCallable<BookInput, Booked>(functions, "alBookSlot");
+const slotsFn = httpsCallable<{ agendaId: string; date: string; propertyId?: string }, { slots: Slot[] }>(functions, "kfGetSlots");
+const bookFn = httpsCallable<BookInput, Booked>(functions, "kfBookSlot");
 
 export type BookingPrefill = {
   agendaId?: string;
-  vehicleId?: string;
+  propertyId?: string;
   date?: string;
   time?: string;
+  assigneeId?: string; // agenda with agents: preselected agent
   client?: { id: string; firstName: string; lastName: string; whatsapp: string };
 };
 
@@ -63,23 +69,26 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
   // Single service: chosen for the user.
   const agendaId = chosenAgenda || (agendas.length === 1 ? agendas[0].id : "");
   const agenda = agendas.find((a) => a.id === agendaId) ?? null;
-  const needsCar = !!agenda?.vehicleRequired;
-  const multiLane = (agenda?.lanes ?? 1) > 1;
-  // Cars for test drives: only what is on sale (loaded only when the agenda asks for a car).
-  const inventory = useVehicles(needsCar);
-  const cars = (inventory.data?.vehicles ?? []).filter((v) => v.status === "disponible" || v.status === "apartado");
-  const [chosenCar, setCar] = useState(prefill?.vehicleId ?? "");
-  const vehicleId = needsCar ? chosenCar : "";
+  const needsProperty = !!agenda?.propertyRequired;
+  const staffed = !!agenda?.agents;
+  const multiLane = staffed || (agenda?.lanes ?? 1) > 1;
+  const names = new Map((useAgents(staffed).data?.agents ?? []).map((a) => [a.id, a.name]));
+  const laneLabel = (l: string) => (staffed ? (names.get(l) ?? "Asesor") : `Espacio ${l}`);
+  // Properties for visits: only what is offered (loaded only when the agenda asks for a property).
+  const inventory = useProperties(needsProperty);
+  const listings = (inventory.data?.properties ?? []).filter((v) => v.status === "disponible" || v.status === "apartado");
+  const [chosenProperty, setChosenProperty] = useState(prefill?.propertyId ?? "");
+  const propertyId = needsProperty ? chosenProperty : "";
   const [date, setDate] = useState(prefill?.date ?? "");
   const [chosenTime, setTime] = useState(prefill?.time ?? "");
-  const [chosenLane, setLane] = useState("");
-  // Free slots of the selected service+car+date (stale results of a previous selection are ignored).
-  const key = `${agendaId}|${vehicleId}|${date}`;
+  const [chosenLane, setLane] = useState(prefill?.assigneeId ?? "");
+  // Free slots of the selected service+property+date (stale results of a previous selection are ignored).
+  const key = `${agendaId}|${propertyId}|${date}`;
   const [loaded, setLoaded] = useState<{ key: string; slots: Slot[] } | null>(null);
   const slots = loaded?.key === key ? loaded.slots : null;
   const slot = slots?.find((s) => s.time === chosenTime) ?? null;
   const time = slot ? chosenTime : "";
-  // Empty = first free sub-space.
+  // Empty = first free sub-space (or, with agents, the least busy free agent).
   const lane = slot?.lanes?.includes(chosenLane) ? chosenLane : "";
   const [firstName, setFirstName] = useState(prefill?.client?.firstName ?? "");
   const [lastName, setLastName] = useState(prefill?.client?.lastName ?? "");
@@ -88,18 +97,18 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
   const [booked, setBooked] = useState<Booked | null>(null);
 
   useEffect(() => {
-    if (!agendaId || !date || (needsCar && !vehicleId)) return;
+    if (!agendaId || !date || (needsProperty && !propertyId)) return;
     let cancelled = false;
-    const k = `${agendaId}|${vehicleId}|${date}`;
-    slotsFn({ agendaId, date, ...(vehicleId ? { vehicleId } : {}) })
+    const k = `${agendaId}|${propertyId}|${date}`;
+    slotsFn({ agendaId, date, ...(propertyId ? { propertyId } : {}) })
       .then((r) => !cancelled && setLoaded({ key: k, slots: r.data.slots }))
-      .catch((e) => !cancelled && (toast.error((e as Error).message), setLoaded({ key: k, slots: [] })));
+      .catch((e) => !cancelled && (toast.error(functionsErrorMessage(e), { id: "slots-error" }), setLoaded({ key: k, slots: [] })));
     return () => {
       cancelled = true;
     };
-  }, [agendaId, date, vehicleId, needsCar]);
+  }, [agendaId, date, propertyId, needsProperty]);
 
-  const canBook = agendaId && (!needsCar || vehicleId) && date && time && firstName.trim() && (whatsapp.trim() || prefill?.client);
+  const canBook = agendaId && (!needsProperty || propertyId) && date && time && firstName.trim() && (whatsapp.trim() || prefill?.client);
 
   async function book() {
     setSaving(true);
@@ -108,8 +117,8 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
         agendaId,
         date,
         time,
-        ...(vehicleId ? { vehicleId } : {}),
-        ...(lane ? { lane } : {}),
+        ...(propertyId ? { propertyId } : {}),
+        ...(lane ? (staffed ? { assigneeId: lane } : { lane }) : {}),
         customer: { ...(prefill?.client ? { clientId: prefill.client.id } : {}), firstName, lastName, whatsapp },
       });
       setBooked(r.data);
@@ -118,7 +127,7 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
     } catch (e) {
       toast.error((e as Error).message);
       // The slot may have just been taken: refresh the list.
-      if (agendaId && date) slotsFn({ agendaId, date, ...(vehicleId ? { vehicleId } : {}) }).then((r) => setLoaded({ key, slots: r.data.slots })).catch(() => {});
+      if (agendaId && date) slotsFn({ agendaId, date, ...(propertyId ? { propertyId } : {}) }).then((r) => setLoaded({ key, slots: r.data.slots })).catch(() => {});
     } finally {
       setSaving(false);
     }
@@ -135,7 +144,8 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
               <DialogDescription className="text-center">
                 {booked.service} · <span className="capitalize">{booked.label}</span>
                 {booked.lane && ` · espacio ${booked.lane}`}
-                {booked.vehicle && <span className="mt-1 block font-medium text-foreground">{booked.vehicle.title}</span>}
+                {booked.assigneeName && ` · atiende ${booked.assigneeName}`}
+                {booked.property && <span className="mt-1 block font-medium text-foreground">{booked.property.title}</span>}
               </DialogDescription>
             </DialogHeader>
             <p className="flex items-center justify-center gap-1.5 text-sm">
@@ -165,21 +175,21 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
                     <option value="">Selecciona un servicio…</option>
                     {agendas.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.service} · {a.durationMin} min{a.price ? ` · ${a.price}` : ""}
+                        {a.service} · {a.durationMin} min{a.price && a.price !== "0" ? ` · ${a.price}` : ""}
                       </option>
                     ))}
                   </select>
                 </div>
-                {needsCar && (
+                {needsProperty && (
                   <div className="space-y-1">
-                    <Label htmlFor="bm-car">Auto a probar</Label>
-                    <select id="bm-car" className={select} value={vehicleId} onChange={(e) => setCar(e.target.value)} disabled={inventory.isLoading}>
+                    <Label htmlFor="bm-property">Propiedad a visitar</Label>
+                    <select id="bm-property" className={select} value={propertyId} onChange={(e) => setChosenProperty(e.target.value)} disabled={inventory.isLoading}>
                       <option value="">
-                        {inventory.isLoading ? "Cargando inventario…" : inventory.error ? "Sin acceso al inventario" : cars.length ? "Selecciona el auto…" : "No hay autos disponibles"}
+                        {inventory.isLoading ? "Cargando propiedades…" : inventory.error ? "Sin acceso a propiedades" : listings.length ? "Selecciona la propiedad…" : "No hay propiedades disponibles"}
                       </option>
-                      {cars.map((v) => (
+                      {listings.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.title || `${v.brand} ${v.model} ${v.year}`} · {money(v.price)}
+                          {v.title || v.propertyType} · {priceLine(v)}
                           {v.stockNumber ? ` · ${v.stockNumber}` : ""}
                           {v.status === "apartado" ? " · apartado" : ""}
                         </option>
@@ -190,14 +200,14 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="bm-date">2. Fecha</Label>
-                    <Input
+                    <DateField
                       id="bm-date"
-                      type="date"
-                      disabled={!agenda || (needsCar && !vehicleId)}
+                      className="w-full"
+                      disabled={!agenda || (needsProperty && !propertyId)}
                       min={agenda ? todayIn(agenda.timezone) : undefined}
                       max={agenda ? addDays(todayIn(agenda.timezone), agenda.maxDaysAhead) : undefined}
                       value={date}
-                      onChange={(e) => setDate(e.target.value)}
+                      onChange={setDate}
                     />
                   </div>
                   <div className="space-y-1">
@@ -209,7 +219,7 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
                       {slots?.map((s) => (
                         <option key={s.time} value={s.time}>
                           {s.time}
-                          {multiLane ? ` · libre: ${(s.lanes ?? []).join(", ")}` : ""}
+                          {multiLane ? ` · libre: ${(s.lanes ?? []).map((l) => (staffed ? laneLabel(l) : l)).join(", ")}` : ""}
                         </option>
                       ))}
                     </select>
@@ -217,7 +227,7 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
                 </div>
                 {multiLane && slot && (
                   <div className="space-y-1">
-                    <Label>Espacio</Label>
+                    <Label>{staffed ? "Asesor" : "Espacio"}</Label>
                     <div className="flex flex-wrap gap-1.5">
                       {["", ...(slot.lanes ?? [])].map((l) => (
                         <button
@@ -226,7 +236,7 @@ export function BookingModal({ open, onOpenChange, prefill }: { open: boolean; o
                           onClick={() => setLane(l)}
                           className={`rounded-md border px-2.5 py-1 text-sm ${lane === l ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"}`}
                         >
-                          {l ? `Espacio ${l}` : "El primero libre"}
+                          {l ? laneLabel(l) : staffed ? "Asignar automáticamente" : "El primero libre"}
                         </button>
                       ))}
                     </div>

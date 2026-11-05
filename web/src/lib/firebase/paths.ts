@@ -1,10 +1,10 @@
 // Single source of truth for Firestore paths. Everything hangs off ROOT.
 // Keep in sync with functions/src/paths.ts.
-export const ROOT = "app-autolix-prod";
+export const ROOT = "kafona-data";
 export const SYSTEM = "_system";
 // Own collection id for comments/DMs: collectionGroup queries of other apps in the project
 // (which use "messages") never see these docs, and ours never see theirs.
-export const MESSAGES = "alMessages";
+export const MESSAGES = "kfMessages";
 
 export const userDoc = (uid: string) => `${ROOT}/${uid}`;
 export const postsCol = (uid: string) => `${ROOT}/${uid}/posts`;
@@ -44,9 +44,9 @@ export const membersCol = (uid: string) => `${ROOT}/${uid}/members`;
 export const memberDoc = (uid: string, memberId: string) => `${membersCol(uid)}/${memberId}`;
 export const memberIndexDoc = (memberUid: string) => `${ROOT}/${SYSTEM}/members/${memberUid}`;
 export const inviteDoc = (tokenHash: string) => `${ROOT}/${SYSTEM}/invites/${tokenHash}`;
-// Inventory, sales pipeline and follow-ups. Vehicle photos live in Storage under `${vehicleDoc}/…`.
-export const vehiclesCol = (uid: string) => `${ROOT}/${uid}/vehicles`;
-export const vehicleDoc = (uid: string, vehicleId: string) => `${vehiclesCol(uid)}/${vehicleId}`;
+// Properties, sales pipeline and follow-ups. Property photos live in Storage under `${propertyDoc}/…`.
+export const propertiesCol = (uid: string) => `${ROOT}/${uid}/properties`;
+export const propertyDoc = (uid: string, propertyId: string) => `${propertiesCol(uid)}/${propertyId}`;
 export const dealsCol = (uid: string) => `${ROOT}/${uid}/deals`;
 export const dealDoc = (uid: string, dealId: string) => `${dealsCol(uid)}/${dealId}`;
 export const salesCol = (uid: string) => `${ROOT}/${uid}/sales`;
@@ -54,7 +54,7 @@ export const tasksCol = (uid: string) => `${ROOT}/${uid}/tasks`;
 export const taskDoc = (uid: string, taskId: string) => `${tasksCol(uid)}/${taskId}`;
 // Logos for post photos (Ajustes → Imágenes), uploaded to Firebase Storage.
 export const brandingPath = (uid: string) => `${ROOT}/${uid}/branding`;
-// Catalogs / quotes (PDF) generated from the inbox, a vehicle or a client.
+// Catalogs / quotes (PDF) generated from the inbox, a property or a client.
 export const quotesCol = (uid: string) => `${ROOT}/${uid}/quotes`;
 export const quoteDoc = (uid: string, quoteId: string) => `${quotesCol(uid)}/${quoteId}`;
 // Public quote links: token → { uid, quoteId } (server-only index, like the Zernio ones).

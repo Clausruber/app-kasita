@@ -27,11 +27,11 @@ export const PERMISSIONS: PermNode[] = [
   { key: "clients", label: "Clientes", children: [{ key: "clients.edit", label: "Editar fichas" }] },
   {
     key: "inventory",
-    label: "Inventario",
+    label: "Propiedades",
     children: [
-      { key: "inventory.edit", label: "Alta y edición de autos" },
-      { key: "inventory.delete", label: "Borrar autos" },
-      { key: "inventory.private", label: "Ver VIN y placas" },
+      { key: "inventory.edit", label: "Alta y edición de propiedades" },
+      { key: "inventory.delete", label: "Borrar propiedades" },
+      { key: "inventory.private", label: "Ver dirección exacta y propietario" },
     ],
   },
   {

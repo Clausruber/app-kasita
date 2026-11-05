@@ -8,7 +8,7 @@ import { uploadPostLogo } from "@/lib/logo-upload";
 import { LOGO_POSITIONS, MARGIN_RANGE, OPACITY_RANGE, POSITION_LABEL, SIZE_RANGE, type PostImageSettings } from "@/lib/watermark";
 import { useCan, useWorkspaceUid } from "@/hooks/use-me";
 import { usePostImages, useSetPostImages, type PostImages } from "@/hooks/use-post-images";
-import { useVehicles } from "@/hooks/use-vehicles";
+import { useProperties } from "@/hooks/use-properties";
 import { WatermarkedImage } from "@/components/shared/watermarked-image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,7 +55,7 @@ export function ImagesCard() {
   const can = useCan();
   const saved = usePostImages();
   const putSaved = useSetPostImages();
-  const cover = useVehicles(can("inventory")).data?.vehicles.find((v) => v.photos[0])?.photos[0]?.url;
+  const cover = useProperties(can("inventory")).data?.properties.find((v) => v.photos[0])?.photos[0]?.url;
   const [draft, setDraft] = useState<Form | null>(null);
   const form = draft ?? (saved.data ? formOf(saved.data) : null);
   const [uploading, setUploading] = useState(false);
@@ -111,7 +111,7 @@ export function ImagesCard() {
           <ImageIcon className="size-5" /> Logo en las publicaciones
         </CardTitle>
         <CardDescription>
-          Al publicar, las fotos llevan tu logo en esta posición. Se agrega a una copia: las fotos originales del inventario no cambian.
+          Al publicar, las fotos llevan tu logo en esta posición. Se agrega a una copia: las fotos originales de la propiedad no cambian.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
@@ -197,7 +197,7 @@ export function ImagesCard() {
             logo={logoUrl ? { ...form, logoUrl } : null}
           />
           <p className="text-xs text-muted-foreground">
-            {cover ? "Portada de un auto de tu inventario." : "Imagen de ejemplo."} El logo se graba igual en cada foto, sea horizontal o vertical.
+            {cover ? "Portada de una de tus propiedades." : "Imagen de ejemplo."} El logo se graba igual en cada foto, sea horizontal o vertical.
           </p>
         </section>
       </CardContent>

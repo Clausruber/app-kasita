@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { CalendarDays, Gauge, Fuel, MapPin, Palette, Settings2 } from "lucide-react";
+import { BedDouble, Bath, Building2, Car, MapPin, Ruler } from "lucide-react";
 import { HttpError } from "@/lib/auth-guard";
 import { quoteByToken, toPublicQuote, type PublicQuote } from "@/lib/quote-public";
-import { money } from "@/lib/vehicle-catalog";
-import { QuoteVehicleActions, ViewBeacon } from "@/components/quotes/public/quote-actions";
+import { money, operationLabel, priceLine } from "@/lib/property-catalog";
+import { QuotePropertyActions, ViewBeacon } from "@/components/quotes/public/quote-actions";
 
 // Public quote page shared by link (WhatsApp/DM). Server-rendered with the Admin SDK; no login.
 export const dynamic = "force-dynamic";
@@ -25,8 +25,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const q = await load((await params).token);
   if (!q) return { title: "Cotización no encontrada", robots: { index: false, follow: false } };
   const title = `${q.company.name || "Cotización"} · ${q.folio}`;
-  const description = q.vehicles.map((v) => `${v.title} ${money(v.price)}`).join(" · ");
-  const image = q.vehicles[0]?.photos[0];
+  const description = q.properties.map((v) => `${v.title} ${priceLine(v)}`).join(" · ");
+  const image = q.properties[0]?.photos[0];
   return {
     title,
     description,
@@ -66,7 +66,7 @@ export default async function PublicQuotePage({ params }: Props) {
       <div className="mx-auto max-w-3xl space-y-4 px-4 py-5">
         <section>
           <h1 className="text-2xl font-bold">{q.clientName ? `Cotización para: ${q.clientName}` : "Cotización"}</h1>
-          <p className="text-sm text-muted-foreground">{q.vehicles.length === 1 ? q.vehicles[0].title : `${q.vehicles.length} opciones`}</p>
+          <p className="text-sm text-muted-foreground">{q.properties.length === 1 ? q.properties[0].title : `${q.properties.length} opciones`}</p>
           {q.sellerName && <p className="text-sm text-muted-foreground">Te atiende {q.sellerName}</p>}
         </section>
 
@@ -77,12 +77,12 @@ export default async function PublicQuotePage({ params }: Props) {
         )}
         {q.accepted && (
           <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-200">
-            ¡Gracias! Nos avisaste que te interesa el <strong>{q.accepted.vehicleTitle}</strong>. Un asesor te contactará en breve.
+            ¡Gracias! Nos avisaste que te interesa <strong>{q.accepted.propertyTitle}</strong>. Un asesor te contactará en breve.
           </p>
         )}
         {q.notes && <p className="rounded-lg bg-background px-3 py-2 text-sm">{q.notes}</p>}
 
-        {q.vehicles.map((v, i) => (
+        {q.properties.map((v, i) => (
           <article key={v.id} className="overflow-hidden rounded-2xl border bg-background shadow-sm">
             {v.photos.length > 0 && (
               <div className="flex snap-x snap-mandatory overflow-x-auto">
@@ -95,30 +95,35 @@ export default async function PublicQuotePage({ params }: Props) {
             <div className="space-y-3 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  {q.vehicles.length > 1 && <p className="text-xs text-muted-foreground">Opción {i + 1}</p>}
+                  {q.properties.length > 1 && <p className="text-xs text-muted-foreground">Opción {i + 1}</p>}
                   <h2 className="text-lg font-semibold">{v.title}</h2>
-                  {v.trim && <p className="text-sm text-muted-foreground">{v.trim}</p>}
+                  <p className="text-sm text-muted-foreground">
+                    {[v.propertyType, operationLabel(v.operation)].filter(Boolean).join(" · ")}
+                  </p>
                 </div>
-                <p className="text-2xl font-bold text-primary">{money(v.price)}</p>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-primary">{priceLine(v)}</p>
+                  {v.maintenanceFee ? <p className="text-xs text-muted-foreground">Mantenimiento {money(v.maintenanceFee)}/mes</p> : null}
+                </div>
               </div>
               <ul className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-                <Spec icon={CalendarDays} label={String(v.year)} />
-                <Spec icon={Gauge} label={v.km ? `${v.km.toLocaleString("es-MX")} km` : "0 km"} />
-                {v.transmission && <Spec icon={Settings2} label={v.transmission} />}
-                {v.fuel && <Spec icon={Fuel} label={v.fuel} />}
-                {v.color && <Spec icon={Palette} label={v.color} />}
+                {v.bedrooms > 0 && <Spec icon={BedDouble} label={`${v.bedrooms} ${v.bedrooms === 1 ? "recámara" : "recámaras"}`} />}
+                {v.bathrooms > 0 && <Spec icon={Bath} label={`${v.bathrooms} ${v.bathrooms === 1 ? "baño" : "baños"}`} />}
+                {v.parking > 0 && <Spec icon={Car} label={`${v.parking} estacionamiento${v.parking === 1 ? "" : "s"}`} />}
+                {v.builtArea ? <Spec icon={Building2} label={`${v.builtArea.toLocaleString("es-MX")} m² construidos`} /> : null}
+                {v.landArea ? <Spec icon={Ruler} label={`${v.landArea.toLocaleString("es-MX")} m² de terreno`} /> : null}
                 {v.location && <Spec icon={MapPin} label={v.location} />}
               </ul>
-              {v.features.length > 0 && (
+              {v.amenities.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {v.features.map((f) => (
+                  {v.amenities.map((f) => (
                     <span key={f} className="rounded-full bg-muted px-2 py-0.5 text-xs">
                       {f}
                     </span>
                   ))}
                 </div>
               )}
-              <QuoteVehicleActions token={token} quote={q} vehicle={v} />
+              <QuotePropertyActions token={token} quote={q} property={v} />
             </div>
           </article>
         ))}
@@ -132,7 +137,7 @@ export default async function PublicQuotePage({ params }: Props) {
   );
 }
 
-function Spec({ icon: Icon, label }: { icon: typeof Gauge; label: string }) {
+function Spec({ icon: Icon, label }: { icon: typeof MapPin; label: string }) {
   return (
     <li className="flex items-center gap-1.5 text-muted-foreground">
       <Icon className="size-4 shrink-0" />

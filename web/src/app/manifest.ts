@@ -1,16 +1,16 @@
 import type { MetadataRoute } from "next";
 
-// Installable app (Add to Home Screen) with the Autolix icon.
+// Installable app (Add to Home Screen) with the Kasita icon.
 export default function manifest(): MetadataRoute.Manifest {
-  const name = process.env.NEXT_PUBLIC_APP_NAME || "Autolix";
+  const name = process.env.NEXT_PUBLIC_APP_NAME || "Kasita";
   return {
-    name: `${name} — La central de mando para lotes y agencias de autos`,
+    name: `${name} — El copiloto 24/7 para tu inmobiliaria`,
     short_name: name,
-    description: "Gestiona tus lotes y agencias de autos y conecta tus redes sociales y WhatsApp en un solo lugar.",
+    description: "Cada cliente recibe respuesta al instante, a cualquier hora y en cualquier red. Un agente de IA atiende comentarios y mensajes, agenda visitas y da seguimiento a cada persona.",
     start_url: "/dashboard",
     display: "standalone",
     background_color: "#ffffff",
-    theme_color: "#001e62",
+    theme_color: "#d8790d",
     icons: [
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml" },
       { src: "/brand/icon-192.png", sizes: "192x192", type: "image/png" },

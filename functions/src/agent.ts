@@ -16,7 +16,7 @@ import {
 } from "./paths";
 import { DF_AI_ENCRYPTION_KEY, decrypt } from "./crypto";
 import { workspaceOf } from "./actor";
-import { sendDm, sendReply } from "./comments";
+import { type DraftQuote, PRIVATE_REPLY_PLATFORMS, sendDm, sendReply } from "./comments";
 import { type ClientField, type ClientProposal, getClientProfile, mergeClientFields, normaliseField } from "./clients";
 import {
   type Agenda,
@@ -32,7 +32,7 @@ import {
   releaseHold,
   reserveSlot,
 } from "./agenda";
-import { bookingVehicle, hasInventory, inventorySection, searchInventory } from "./inventory";
+import { bookingProperty, hasInventory, inventorySection, searchInventory } from "./inventory";
 
 const OPENROUTER_URL = process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1";
 const MAX_AGE_MS = 24 * 3600_000; // older comments never trigger the agent
@@ -53,9 +53,22 @@ type AiSettings = {
   // Markdown generated from Ajustes → Empresa (address, contact, opening hours).
   company?: string;
   companyTimezone?: string;
+  // Comment words that ask for a quote by private reply (absent = DEFAULT_QUOTE_KEYWORDS).
+  quoteKeywords?: string[];
+  quoteKeywordsOnly?: boolean; // true: send quotes only when a keyword appears
+};
+
+// Keep in sync with web/src/lib/openrouter.ts DEFAULT_QUOTE_KEYWORDS.
+const DEFAULT_QUOTE_KEYWORDS = ["cotiza"];
+const quoteKeywordsOf = (ai: AiSettings) => (Array.isArray(ai.quoteKeywords) ? ai.quoteKeywords : DEFAULT_QUOTE_KEYWORDS).filter((k) => typeof k === "string" && k.trim());
+const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+/** Keyword at the start of a word, ignoring case and accents: "cotiza" matches "Cotización", "cotizar", "#cotiza". */
+export const keywordIn = (text: string, keyword: string) => {
+  const k = fold(keyword.trim()).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return !!k && new RegExp(`(^|[^\\p{L}\\p{N}])${k}`, "u").test(fold(text));
 };
 type Msg = FirebaseFirestore.DocumentData & { id: string };
-type DraftBooking = { id: string; service: string; label: string; start: number; vehicle?: string | null; lane?: string | null };
+type DraftBooking = { id: string; service: string; label: string; start: number; property?: string | null; lane?: string | null };
 export type AgentResult = {
   reply: string;
   needsHuman: boolean;
@@ -63,11 +76,12 @@ export type AgentResult = {
   model: string;
   booking: DraftBooking | null;
   client: ClientProposal | null; // data the person gave, saved to the client card when the reply is sent
+  quote: DraftQuote | null; // comments: quote sent by private reply (DM) when the reply is sent
   trace?: ToolTrace[]; // only in test runs
 };
 type ToolTrace = { tool: string; args: unknown; result: unknown };
 // dryRun: test chat from Ajustes → nothing is booked, cancelled or saved.
-type RunState = { booking: DraftBooking | null; client: ClientProposal | null; dryRun: boolean; trace: ToolTrace[] };
+type RunState = { booking: DraftBooking | null; client: ClientProposal | null; quote: DraftQuote | null; quotesAllowed: boolean; dryRun: boolean; trace: ToolTrace[] };
 
 const authorKey = (m: FirebaseFirestore.DocumentData) => m.author?.username || m.author?.name || "?";
 
@@ -176,7 +190,7 @@ function agendaSection(agendas: Agenda[], existing: FirebaseFirestore.DocumentDa
     "Servicios que se pueden reservar:",
     ...agendas.map(
       (a) =>
-        `- agendaId="${a.id}" · ${a.service} · ${a.durationMin} min${a.price ? ` · ${a.price}` : ""}${a.description ? ` · ${a.description}` : ""}${a.vehicleRequired ? " · REQUIERE AUTO (vehicleId)" : ""}`,
+        `- agendaId="${a.id}" · ${a.service} · ${a.durationMin} min${a.price ? ` · ${a.price}` : ""}${a.description ? ` · ${a.description}` : ""}${a.propertyRequired ? " · REQUIERE INMUEBLE (propertyId)" : ""}`,
     ),
     existing.length
       ? `Citas próximas de esta persona: ${existing.map((b) => `bookingId="${b.id}" ${b.service} ${formatSlot((b.start as Timestamp).toMillis(), b.timezone ?? tz)} (${b.status === "held" ? "pendiente de confirmar" : "confirmada"})`).join("; ")}`
@@ -187,10 +201,10 @@ function agendaSection(agendas: Agenda[], existing: FirebaseFirestore.DocumentDa
     "- Llama a book_appointment SOLO cuando la persona confirme explícitamente un horario concreto que le ofreciste. Después confirma en la respuesta el servicio, el día y la hora.",
     "- Al confirmar una cita, si la ficha no tiene nombre y apellidos o WhatsApp, pídelos (el WhatsApp solo por mensaje directo).",
     "- Si book_appointment devuelve slot_taken, dilo y ofrece las alternativas que devuelve.",
-    ...(agendas.some((a) => a.vehicleRequired)
+    ...(agendas.some((a) => a.propertyRequired)
       ? [
-          "- Pruebas de manejo (agendas que REQUIEREN AUTO): antes de ver horarios confirma qué auto quiere probar. Obtén su vehicleId con search_inventory (nunca lo inventes) y pásalo a check_availability y a book_appointment. Si no sabe cuál, ayúdale a elegir con search_inventory.",
-          "- Al confirmar la prueba de manejo menciona el auto, el día y la hora.",
+          "- Visitas (agendas que REQUIEREN INMUEBLE): antes de ver horarios confirma qué inmueble quiere visitar. Obtén su propertyId con search_inventory (nunca lo inventes) y pásalo a check_availability y a book_appointment. Si no sabe cuál, ayúdale a elegir con search_inventory.",
+          "- Al confirmar la visita menciona el inmueble (tipo y colonia, nunca la dirección exacta), el día, la hora y, si book_appointment devuelve agent, el nombre del asesor que la atenderá; la dirección se la comparte ese asesor.",
         ]
       : []),
     "- Para cancelar una cita de esta persona usa cancel_appointment con su bookingId.",
@@ -308,7 +322,7 @@ const AGENDA_TOOLS = [
         properties: {
           agendaId: { type: "string" },
           date: { type: "string", description: "YYYY-MM-DD" },
-          vehicleId: { type: "string", description: "Auto de la prueba de manejo (de search_inventory): oculta horarios en que ese auto ya está ocupado" },
+          propertyId: { type: "string", description: "Inmueble a visitar (de search_inventory): oculta horarios en que ese inmueble ya tiene visita" },
         },
         required: ["agendaId", "date"],
       },
@@ -326,7 +340,7 @@ const AGENDA_TOOLS = [
           date: { type: "string", description: "YYYY-MM-DD" },
           time: { type: "string", description: "HH:mm" },
           customerName: { type: "string" },
-          vehicleId: { type: "string", description: "Obligatorio en agendas que REQUIEREN AUTO: vehicleId de search_inventory" },
+          propertyId: { type: "string", description: "Obligatorio en agendas que REQUIEREN INMUEBLE: propertyId de search_inventory" },
         },
         required: ["agendaId", "date", "time"],
       },
@@ -346,27 +360,57 @@ const INVENTORY_TOOL = {
   type: "function",
   function: {
     name: "search_inventory",
-    description: "Busca autos DISPONIBLES en el inventario real del lote. Úsala antes de mencionar cualquier auto o precio.",
+    description: "Busca inmuebles DISPONIBLES (venta o renta) en el inventario real de la inmobiliaria. Úsala antes de mencionar cualquier inmueble, precio o renta.",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Texto libre solo con marca, modelo, versión o color (p. ej. 'jetta rojo'). No pongas precios ni palabras como 'auto'." },
-        brand: { type: "string" },
-        model: { type: "string" },
-        yearMin: { type: "number" },
-        yearMax: { type: "number" },
-        price: { type: "number", description: "Presupuesto aproximado en MXN ('un auto de 205 mil' → 205000): devuelve los más cercanos a ese precio" },
-        priceMin: { type: "number", description: "Precio mínimo en MXN ('desde 200 mil')" },
-        priceMax: { type: "number", description: "Precio máximo en MXN ('hasta 300 mil', 'menos de 300 mil')" },
-        kmMax: { type: "number", description: "Kilometraje máximo ('menos de 50 mil km' → 50000)" },
-        bodyType: { type: "string", description: "Sedán, SUV, Pick-Up, Hatchback, Minivan, Coupé, Convertible…" },
-        transmission: { type: "string", description: "Automática, Manual o CVT" },
-        fuel: { type: "string", description: "Gasolina, Diésel, Híbrido o Eléctrico" },
-        condition: { type: "string", description: "nuevo o usado" },
+        query: { type: "string", description: "Texto libre solo con desarrollo, colonia o amenidad (p. ej. 'alberca', 'Torre Alameda'). No pongas precios." },
+        operation: { type: "string", description: "venta o renta" },
+        propertyType: { type: "string", description: "Departamento, Casa, Casa en condominio, Terreno, Local comercial, Oficina o Bodega" },
+        city: { type: "string", description: "Ciudad o municipio" },
+        neighborhood: { type: "string", description: "Colonia" },
+        bedroomsMin: { type: "number", description: "Recámaras mínimas ('de 2 recámaras' → 2)" },
+        bathroomsMin: { type: "number" },
+        parkingMin: { type: "number", description: "Lugares de estacionamiento mínimos" },
+        price: {
+          type: "number",
+          description: "Presupuesto aproximado en MXN: precio de venta, o renta mensual si operation=renta ('renta de 18 mil' → 18000, 'de 3 millones' → 3000000)",
+        },
+        priceMin: { type: "number", description: "Mínimo en MXN ('desde 2 millones')" },
+        priceMax: { type: "number", description: "Máximo en MXN ('hasta 20 mil al mes', 'menos de 4 millones')" },
+        petsAllowed: { type: "boolean", description: "true si la persona tiene mascotas" },
+        furnished: { type: "boolean", description: "true si lo busca amueblado" },
       },
     },
   },
 };
+
+const QUOTE_TOOL = {
+  type: "function",
+  function: {
+    name: "send_quote_by_dm",
+    description:
+      "Envía a esta persona, por mensaje privado, la cotización (link con precio, fotos y detalles) de un inmueble. Úsala cuando en el comentario pida precio, costo, información o cotización.",
+    parameters: {
+      type: "object",
+      properties: { propertyId: { type: "string", description: "propertyId de search_inventory (nunca lo inventes)" } },
+      required: ["propertyId"],
+    },
+  },
+};
+
+/** Rules for quotes requested in public comments (only when send_quote_by_dm is offered). */
+const QUOTE_RULES = [
+  "\n# COTIZACIONES PEDIDAS EN COMENTARIOS",
+  "- Si la persona pide precio, costo, informes o cotización de un inmueble, identifica cuál es: casi siempre el del post. Búscalo con search_inventory usando los datos del texto del post (tipo, colonia, desarrollo, recámaras, precio).",
+  "- Si hay un único inmueble que encaja claramente, llama a send_quote_by_dm con su propertyId. Después responde en el comentario, en 1-2 frases, que ya le enviaste la cotización por mensaje privado (p. ej. «¡Hola! Te acabamos de enviar la cotización por mensaje privado 📩»).",
+  "- En el comentario NUNCA escribas el precio, la renta, montos ni datos personales: todo eso va en el mensaje privado.",
+  "- Si no queda claro qué inmueble le interesa (varios encajan o ninguno), NO llames a send_quote_by_dm: pregúntale en el comentario cuál le interesa.",
+  "- Llama a send_quote_by_dm como máximo una vez por comentario.",
+];
+
+// "$3,200,000", "3.2 millones", "18 mil": a public comment answer must not carry prices.
+const PRICE_RE = /\$\s?\d|\d[\d.,]*\s?(mil\b|millones?|mdp|k\b)|\bmxn\b/i;
 
 type ToolCall = { id: string; function: { name: string; arguments: string } };
 
@@ -403,7 +447,7 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
     case "check_availability": {
       if (!agenda) return { error: "agendaId desconocido", agendas: agendas.map((a) => ({ agendaId: a.id, service: a.service })) };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date ?? "")) return { error: "date debe ser YYYY-MM-DD" };
-      const slots = await getSlots(uid, agenda, args.date, Date.now(), args.vehicleId || null);
+      const slots = await getSlots(uid, agenda, args.date, Date.now(), args.propertyId || null);
       return {
         agendaId: agenda.id,
         service: agenda.service,
@@ -411,33 +455,37 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
         timezone: agenda.timezone,
         free: slots.map((s) => s.time),
         note: slots.length ? null : "No hay horarios libres ese día (cerrado, bloqueado, pasado o completo).",
-        ...(agenda.vehicleRequired && !args.vehicleId ? { reminder: "Esta agenda requiere auto: confirma el vehicleId antes de reservar." } : {}),
+        ...(agenda.propertyRequired && !args.propertyId ? { reminder: "Esta agenda requiere inmueble: confirma el propertyId antes de reservar." } : {}),
       };
     }
     case "book_appointment": {
       if (!agenda) return { error: "agendaId desconocido" };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date ?? "") || !/^\d{2}:\d{2}$/.test(args.time ?? "")) return { error: "date YYYY-MM-DD y time HH:mm" };
-      let vehicle: { id: string; title: string } | null = null;
-      if (agenda.vehicleRequired || args.vehicleId) {
-        if (!args.vehicleId) return { error: "vehicle_required", note: "Pregunta qué auto quiere probar y obtén su vehicleId con search_inventory." };
-        const v = await bookingVehicle(uid, args.vehicleId);
+      let property: { id: string; title: string } | null = null;
+      if (agenda.propertyRequired || args.propertyId) {
+        if (!args.propertyId) return { error: "property_required", note: "Pregunta qué inmueble quiere visitar y obtén su propertyId con search_inventory." };
+        const v = await bookingProperty(uid, args.propertyId);
         if ("error" in v) return { error: v.error };
-        vehicle = v;
+        property = v;
       }
       if (state.dryRun) {
-        const slots = await getSlots(uid, agenda, args.date, Date.now(), vehicle?.id);
+        const slots = await getSlots(uid, agenda, args.date, Date.now(), property?.id);
         const slot = slots.find((s) => s.time === args.time);
         if (!slot) return { error: "slot_taken", alternatives: slots.slice(0, 5).map((s) => `${s.date} ${s.time}`) };
         const label = formatSlot(slot.start, agenda.timezone);
-        const lane = agenda.lanes > 1 ? slot.lanes[0] : null;
-        state.booking = { id: "simulada", service: agenda.service, label, start: slot.start, vehicle: vehicle?.title ?? null, lane };
-        return { ok: true, bookingId: "simulada", service: agenda.service, when: label, vehicle: vehicle?.title ?? null, space: lane };
+        const lane = !agenda.agents && agenda.lanes > 1 ? slot.lanes[0] : null;
+        state.booking = { id: "simulada", service: agenda.service, label, start: slot.start, property: property?.title ?? null, lane };
+        return { ok: true, bookingId: "simulada", service: agenda.service, when: label, property: property?.title ?? null, space: lane };
       }
       // One booking per reply: a new one replaces the hold proposed earlier in this same run.
       if (state.booking) await releaseHold(uid, state.booking.id).catch(() => {});
+      // Same agent who already attends this person, when free (continuity); else the least busy one.
+      const previous = ctx.customer.authorId ? await customerBookings(uid, String(ctx.customer.authorId)).catch(() => []) : [];
+      const preferAssigneeIds = previous.map((x) => x.assigneeId as string | null).filter((x): x is string => !!x);
       try {
         const b = await reserveSlot(uid, agenda.id, args.date, args.time, {
           status: "held",
+          preferAssigneeIds,
           customer: {
             ...ctx.customer,
             // Data the person just gave in this conversation wins over the card.
@@ -449,10 +497,10 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
           },
           channel: ctx.channel,
           source: "ai",
-          vehicle,
+          property,
         });
-        state.booking = { id: b.id, service: b.service, label: b.label, start: b.start, vehicle: b.vehicle?.title ?? null, lane: b.lane };
-        return { ok: true, bookingId: b.id, service: b.service, when: b.label, vehicle: b.vehicle?.title ?? null, space: b.lane };
+        state.booking = { id: b.id, service: b.service, label: b.label, start: b.start, property: b.property?.title ?? null, lane: b.lane };
+        return { ok: true, bookingId: b.id, service: b.service, when: b.label, property: b.property?.title ?? null, space: b.lane, agent: b.assigneeName };
       } catch (e) {
         if (e instanceof SlotTakenError) return { error: "slot_taken", alternatives: e.alternatives.map((s) => `${s.date} ${s.time}`) };
         throw e;
@@ -460,6 +508,18 @@ async function runTool(uid: string, ctx: Context, agendas: Agenda[], state: RunS
     }
     case "search_inventory":
       return searchInventory(uid, args);
+    case "send_quote_by_dm": {
+      if (ctx.channel.kind !== "comment" || !state.quotesAllowed) return { error: "no disponible para este comentario" };
+      if (ctx.target.quoteDm) return { error: "already_sent", note: "Ya se le envió una cotización por mensaje privado a este comentario." };
+      const v = await bookingProperty(uid, args.propertyId);
+      if ("error" in v) return { error: v.error };
+      state.quote = { propertyId: v.id, title: v.title };
+      return {
+        ok: true,
+        property: v.title,
+        note: "La cotización se enviará por mensaje privado junto con tu respuesta. En el comentario di solo que ya se la enviaste por mensaje privado, sin precios.",
+      };
+    }
     case "cancel_appointment": {
       if (state.dryRun) return { ok: true, simulated: true };
       const mine = await customerBookings(uid, String(ctx.customer.authorId));
@@ -477,7 +537,7 @@ async function chat(apiKey: string, body: object) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://autolix-d71c4.web.app",
+      "HTTP-Referer": "https://kasita-crm.web.app",
       "X-Title": "Social Planner",
     },
     body: JSON.stringify(body),
@@ -503,8 +563,23 @@ async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettin
     { role: "system", content: systemPrompt(ai, [...agendaSection(agendas, existing), ...inventory], ctx.channel.kind === "comment") },
     { role: "user", content: userPrompt(ctx, note) },
   ];
-  const state: RunState = { booking: null, client: null, dryRun, trace: [] };
-  const tools = [CLIENT_TOOL, ...(stock ? [INVENTORY_TOOL] : []), ...(agendas.length ? AGENDA_TOOLS : [])];
+  const state: RunState = { booking: null, client: null, quote: null, quotesAllowed: false, dryRun, trace: [] };
+  // Quotes by private reply: public comments on networks that allow a DM to whoever commented (or the test chat).
+  // Keywords from Ajustes → Agente IA: a match asks for the quote; "only" mode offers it on a match alone.
+  const keywords = quoteKeywordsOf(ai);
+  const hit = keywords.find((k) => keywordIn(String(ctx.target.text ?? ""), k));
+  const quotes =
+    stock && ctx.channel.kind === "comment" && (dryRun || PRIVATE_REPLY_PLATFORMS.includes(ctx.platform)) && (!ai.quoteKeywordsOnly || !!hit);
+  state.quotesAllowed = !!quotes;
+  if (quotes) {
+    (messages[0] as { content: string }).content += "\n" + QUOTE_RULES.join("\n");
+    if (ai.quoteKeywordsOnly)
+      (messages[0] as { content: string }).content += "\n- El dueño pidió enviar cotizaciones solo cuando el comentario contiene una de sus palabras clave.";
+    if (hit)
+      (messages[1] as { content: string }).content +=
+        `\n\nEl comentario contiene la palabra clave de cotización «${hit}»: envíale la cotización del inmueble del post con send_quote_by_dm (si no queda claro cuál es, pregúntale).`;
+  }
+  const tools = [CLIENT_TOOL, ...(stock ? [INVENTORY_TOOL] : []), ...(quotes ? [QUOTE_TOOL] : []), ...(agendas.length ? AGENDA_TOOLS : [])];
   let content = "";
 
   for (let round = 0; ; round++) {
@@ -534,16 +609,19 @@ async function runAgent(uid: string, apiKey: string, model: string, ai: AiSettin
     out = parseJson(content);
   } catch {
     // Model ignored the JSON format: use the text, but have a human check it.
-    return { reply: content.trim(), needsHuman: true, reason: "La IA no devolvió el formato esperado", model, booking: state.booking, client: state.client, ...(dryRun ? { trace: state.trace } : {}) };
+    return { reply: content.trim(), needsHuman: true, reason: "La IA no devolvió el formato esperado", model, booking: state.booking, client: state.client, quote: state.quote, ...(dryRun ? { trace: state.trace } : {}) };
   }
   const reply = (out.reply ?? "").trim();
+  // A public comment must never carry the price: a human checks it first.
+  const leaksPrice = ctx.channel.kind === "comment" && !!state.quote && PRICE_RE.test(reply);
   return {
     reply,
-    needsHuman: Boolean(out.needsHuman) || !reply,
-    reason: out.reason ?? (reply ? null : "La IA no propuso respuesta"),
+    needsHuman: Boolean(out.needsHuman) || !reply || leaksPrice,
+    reason: out.reason ?? (!reply ? "La IA no propuso respuesta" : leaksPrice ? "La respuesta pública menciona un precio" : null),
     model,
     booking: state.booking,
     client: state.client,
+    quote: state.quote,
     ...(dryRun ? { trace: state.trace } : {}),
   };
 }
@@ -563,6 +641,7 @@ const draftOf = (r: AgentResult) => ({
   reason: r.reason,
   booking: r.booking,
   client: r.client,
+  quote: r.quote,
   at: FieldValue.serverTimestamp(),
 });
 
@@ -590,7 +669,7 @@ async function onIncoming(uid: string, ref: FirebaseFirestore.DocumentReference,
 
     if (ai.mode === "auto" && !result.needsHuman) {
       const requestId = `ai_${ref.id}`.slice(0, 64);
-      const opts = { sentBy: "ai" as const, requestId, booking: result.booking ? ("confirm" as const) : undefined, proposed: result.booking, saveClient: true, proposedClient: result.client };
+      const opts = { sentBy: "ai" as const, requestId, booking: result.booking ? ("confirm" as const) : undefined, proposed: result.booking, saveClient: true, proposedClient: result.client, quote: result.quote ? ("send" as const) : undefined, proposedQuote: result.quote };
       if (ctx.channel.kind === "dm") await sendDm(uid, ctx.channel.conversationId!, ref.id, result.reply, opts);
       else await sendReply(uid, ctx.channel.postId!, ref.id, result.reply, opts);
       logger.info("agent replied", { uid, path: ref.path, model: result.model, booking: result.booking?.id ?? null });
@@ -605,7 +684,7 @@ async function onIncoming(uid: string, ref: FirebaseFirestore.DocumentReference,
 }
 
 /** Runs the agent on every new incoming comment, according to the user's mode. */
-export const alAgentOnComment = onDocumentCreated(
+export const kfAgentOnComment = onDocumentCreated(
   { document: `${ROOT}/{uid}/posts/{postId}/${MESSAGES}/{messageId}`, secrets: [DF_AI_ENCRYPTION_KEY] },
   async (event) => {
     const { uid, postId, messageId } = event.params;
@@ -616,7 +695,7 @@ export const alAgentOnComment = onDocumentCreated(
 );
 
 /** Same for direct messages. */
-export const alAgentOnDm = onDocumentCreated(
+export const kfAgentOnDm = onDocumentCreated(
   { document: `${ROOT}/{uid}/conversations/{convId}/${MESSAGES}/{messageId}`, secrets: [DF_AI_ENCRYPTION_KEY] },
   async (event) => {
     const { uid, convId, messageId } = event.params;
@@ -627,7 +706,7 @@ export const alAgentOnDm = onDocumentCreated(
 );
 
 /** On-demand draft ("Sugerir con IA"), in any mode, optionally guided by a note. Comments or DMs. */
-export const alSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const kfSuggestReply = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "inbox.reply");
   const { postId, conversationId, messageId, note } = req.data as { postId?: string; conversationId?: string; messageId?: string; note?: string };
   if ((!postId && !conversationId) || !messageId) throw new HttpsError("invalid-argument", "Faltan postId/conversationId o messageId");
@@ -657,7 +736,7 @@ const TEST_MAX_MESSAGES = 30;
 const TEST_MAX_CHARS = 1000;
 
 /** Test chat in Ajustes → Agente IA: same prompt and tools, but nothing is sent, booked or saved. */
-export const alTestAgent = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
+export const kfTestAgent = onCall({ secrets: [DF_AI_ENCRYPTION_KEY] }, async (req) => {
   const uid = await workspaceOf(req, "settings.agente");
   const { channel, postText, messages } = (req.data ?? {}) as { channel?: string; postText?: string; messages?: { from?: string; text?: string }[] };
   const thread = (Array.isArray(messages) ? messages : [])

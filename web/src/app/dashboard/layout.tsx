@@ -4,7 +4,7 @@ import { Fragment, useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { BellRing, CalendarCheck, CalendarDays, Car, Clock, FileText, Inbox, KanbanSquare, Lock, LogOut, Newspaper, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { BellRing, Building2, CalendarCheck, CalendarDays, Clock, FileText, Inbox, KanbanSquare, Lock, LogOut, Newspaper, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useInbox } from "@/hooks/use-firestore";
@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 // `perm`: access key a team member needs (lib/permissions.ts). Ajustes always opens (Perfil is for everyone).
 // `group`: a line separates groups in the sidebar (lot · selling · settings).
 const NAV = [
-  { href: "/dashboard/inventory", label: "Inventario", icon: Car, perm: "inventory", group: 1 },
+  { href: "/dashboard/inventory", label: "Propiedades", icon: Building2, perm: "inventory", group: 1 },
   { href: "/dashboard/clients", label: "Clientes", icon: UserRound, perm: "clients", group: 1 },
   { href: "/dashboard/calendar", label: "Calendario", icon: CalendarDays, perm: "calendar", group: 1 },
   { href: "/dashboard/agenda", label: "Agenda", icon: CalendarCheck, perm: "agenda", group: 1 },

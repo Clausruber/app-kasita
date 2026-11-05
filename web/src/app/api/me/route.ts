@@ -4,7 +4,7 @@ import { HttpError, withUser } from "@/lib/auth-guard";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { tenantDoc, userDoc } from "@/lib/firebase/paths";
 import { ensureTenant, isSuperAdmin, tenantStatus } from "@/lib/tenants";
-import { ensureTestDriveAgenda } from "@/lib/agendas";
+import { ensureVisitAgenda } from "@/lib/agendas";
 
 /**
  * The signed-in user's role, workspace and access (drives the dashboard gate, the nav and the tabs).
@@ -30,7 +30,7 @@ export const GET = withUser(
     const [superadmin, status] = await Promise.all([
       isSuperAdmin(user),
       tenantStatus(a.uid),
-      ensureTestDriveAgenda(a.uid).catch((e) => console.warn("test drive agenda", e)),
+      ensureVisitAgenda(a.uid).catch((e) => console.warn("visit agenda", e)),
     ]);
     return NextResponse.json({
       uid: a.authUid,

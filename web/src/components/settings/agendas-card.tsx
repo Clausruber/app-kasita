@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { CalendarClock, Pencil, Plus } from "lucide-react";
+import { api } from "@/lib/api";
 import type { Agenda } from "@/lib/types";
 import { useAgendas } from "@/hooks/use-firestore";
 import { AgendaEditor, DAYS } from "@/components/agenda/agenda-editor";
@@ -20,6 +22,14 @@ const hours = (a: Agenda) =>
 export function AgendasCard() {
   const { data: agendas, loading } = useAgendas();
   const [editing, setEditing] = useState<Agenda | "new" | null>(null);
+
+  async function toggleActive(a: Agenda) {
+    try {
+      await api(`/api/agendas/${a.id}`, { method: "PUT", body: { ...a, active: !a.active } });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   return (
     <Card>
@@ -49,9 +59,13 @@ export function AgendasCard() {
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {a.durationMin} min{a.bufferMin ? ` + ${a.bufferMin} descanso` : ""}
-                  {a.price ? ` · ${a.price}` : ""} · {a.timezone}
+                  {a.price && a.price !== "0" ? ` · ${a.price}` : ""} · {a.timezone}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">{hours(a)}</p>
+                <label className="mt-1 flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={a.active} onChange={() => toggleActive(a)} />
+                  {a.active ? "Activa (el agente la ofrece)" : "Inactiva"}
+                </label>
               </div>
               <Button variant="ghost" size="icon-sm" aria-label={`Editar ${a.service}`} onClick={() => setEditing(a)}>
                 <Pencil />

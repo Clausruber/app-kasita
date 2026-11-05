@@ -4,10 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
 } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
@@ -26,7 +24,6 @@ const ERRORS: Record<string, string> = {
   "auth/invalid-credential": "Contraseña incorrecta",
   "auth/wrong-password": "Contraseña incorrecta",
   "auth/weak-password": "La contraseña debe tener al menos 6 caracteres",
-  "auth/popup-closed-by-user": "Se cerró la ventana de Google",
   "auth/too-many-requests": "Demasiados intentos. Espera unos minutos.",
 };
 
@@ -101,18 +98,6 @@ export function InviteForm({ token }: { token: string }) {
     });
   }
 
-  function withGoogle() {
-    if (!invite) return;
-    run(async () => {
-      const cred = await signInWithPopup(auth, new GoogleAuthProvider().setCustomParameters({ login_hint: invite.email }));
-      if (cred.user.email?.toLowerCase() !== invite.email) {
-        await signOut(auth);
-        throw new Error(`Esa cuenta de Google no es ${invite.email}`);
-      }
-      await finish();
-    });
-  }
-
   const signedInAsOther = user && invite && user.email?.toLowerCase() !== invite.email;
   const signedInAsInvited = user && invite && user.email?.toLowerCase() === invite.email;
 
@@ -150,55 +135,50 @@ export function InviteForm({ token }: { token: string }) {
             </Button>
           )}
           {invite && !user && (
-            <>
-              <form onSubmit={onSubmit} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="iv-first">Nombre</Label>
-                    <Input id="iv-first" value={invite.firstName} readOnly disabled />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="iv-last">Apellidos</Label>
-                    <Input id="iv-last" value={invite.lastName} readOnly disabled />
-                  </div>
+            <form onSubmit={onSubmit} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="iv-first">Nombre</Label>
+                  <Input id="iv-first" value={invite.firstName} readOnly disabled />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="iv-email" className="flex items-center gap-1">
-                    Email <Lock className="size-3 text-muted-foreground" />
-                  </Label>
-                  <Input id="iv-email" type="email" value={invite.email} readOnly disabled />
+                  <Label htmlFor="iv-last">Apellidos</Label>
+                  <Input id="iv-last" value={invite.lastName} readOnly disabled />
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="iv-email" className="flex items-center gap-1">
+                  Email <Lock className="size-3 text-muted-foreground" />
+                </Label>
+                <Input id="iv-email" type="email" value={invite.email} readOnly disabled />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="iv-wa">WhatsApp</Label>
+                <Input id="iv-wa" type="tel" placeholder="+5511987654321" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="iv-pw">{existing ? "Contraseña de tu cuenta" : "Crea una contraseña"}</Label>
+                <Input
+                  id="iv-pw"
+                  type="password"
+                  required
+                  minLength={existing ? 6 : 8}
+                  autoComplete={existing ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              {!existing && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="iv-wa">WhatsApp</Label>
-                  <Input id="iv-wa" type="tel" placeholder="+5511987654321" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+                  <Label htmlFor="iv-pw2">Repite la contraseña</Label>
+                  <Input id="iv-pw2" type="password" required autoComplete="new-password" value={repeat} onChange={(e) => setRepeat(e.target.value)} />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="iv-pw">{existing ? "Contraseña de tu cuenta" : "Crea una contraseña"}</Label>
-                  <Input
-                    id="iv-pw"
-                    type="password"
-                    required
-                    minLength={existing ? 6 : 8}
-                    autoComplete={existing ? "current-password" : "new-password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                {!existing && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="iv-pw2">Repite la contraseña</Label>
-                    <Input id="iv-pw2" type="password" required autoComplete="new-password" value={repeat} onChange={(e) => setRepeat(e.target.value)} />
-                  </div>
-                )}
-                {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" className="w-full" disabled={busy}>
-                  {busy ? "Entrando…" : existing ? "Entrar y unirme" : "Crear cuenta y unirme"}
-                </Button>
-              </form>
-              <Button variant="outline" className="w-full" disabled={busy} onClick={withGoogle}>
-                Continuar con Google ({invite.email})
+              )}
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? "Entrando…" : existing ? "Entrar y unirme" : "Crear cuenta y unirme"}
               </Button>
-            </>
+            </form>
           )}
           {error && user && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>

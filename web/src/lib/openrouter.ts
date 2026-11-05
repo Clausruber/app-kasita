@@ -14,7 +14,7 @@ export async function llmText(apiKey: string, model: string, system: string, use
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://autolix-d71c4.web.app",
+      "HTTP-Referer": "https://kasita-crm.web.app",
       "X-Title": "Social Planner",
     },
     body: JSON.stringify({
@@ -44,15 +44,22 @@ export type AiSettings = {
   textModel: string | null;
   instructions: string;
   brand: { name: string; tone: string; about: string; faq: string; never: string };
+  quoteKeywords: string[]; // comment words that ask for a quote by private reply
+  quoteKeywordsOnly: boolean; // true: send quotes only when one of them appears
   hasKey: boolean;
   keyHint: string | null;
 };
+
+// Keep in sync with functions/src/agent.ts DEFAULT_QUOTE_KEYWORDS.
+export const DEFAULT_QUOTE_KEYWORDS = ["cotiza"];
 
 export const DEFAULT_AI: AiSettings = {
   mode: "off",
   textModel: null,
   instructions: "",
   brand: { name: "", tone: "", about: "", faq: "", never: "" },
+  quoteKeywords: DEFAULT_QUOTE_KEYWORDS,
+  quoteKeywordsOnly: false,
   hasKey: false,
   keyHint: null,
 };
@@ -82,6 +89,8 @@ export async function readAiSettings(uid: string): Promise<AiSettings> {
     mode: ai.mode ?? DEFAULT_AI.mode,
     instructions: ai.instructions ?? "",
     brand: { ...DEFAULT_AI.brand, ...(ai.brand ?? {}) },
+    quoteKeywords: Array.isArray(ai.quoteKeywords) ? ai.quoteKeywords : DEFAULT_QUOTE_KEYWORDS,
+    quoteKeywordsOnly: ai.quoteKeywordsOnly === true,
     ...global,
   };
 }

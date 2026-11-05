@@ -9,7 +9,7 @@ function createApp(): App {
   // Look for the default app only: on Firebase Hosting the frameworks runtime creates its own named app.
   const existing = getApps().find((a) => a.name === "[DEFAULT]");
   if (existing) return existing;
-  // On Firebase App Hosting / emulators, application default credentials are used.
+  // On Firebase Hosting, application default credentials are used.
   // Locally against a real project, set FIREBASE_SERVICE_ACCOUNT to the JSON key.
   const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
   return initializeApp(
@@ -22,5 +22,5 @@ function createApp(): App {
 const app = createApp();
 export const adminAuth = getAuth(app);
 export const adminDb = getFirestore(app);
-/** Bucket holding vehicle photos (paths under app-autolix-prod/{uid}/vehicles/…). */
+/** Bucket holding property photos (paths under kafona-data/{uid}/properties/…). */
 export const adminBucket = () => getStorage(app).bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);

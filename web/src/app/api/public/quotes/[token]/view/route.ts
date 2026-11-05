@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: Ctx) {
           assigneeId: first.sellerId ?? null,
           clientId: first.clientId ?? null,
           dealId: first.dealId ?? null,
-          vehicleId: first.vehicles?.[0]?.id ?? null,
+          propertyId: first.properties?.[0]?.id ?? null,
           conversationId: first.conversationId ?? null,
           kind: "quote_viewed",
           done: false,

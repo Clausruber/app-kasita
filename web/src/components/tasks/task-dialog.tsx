@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-type Prefill = { title?: string; clientId?: string; dealId?: string; vehicleId?: string; conversationId?: string };
+type Prefill = { title?: string; clientId?: string; dealId?: string; propertyId?: string; conversationId?: string };
 const local = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm");
 
 /** Create or edit a follow-up (call, send a quote, confirm a visit…). */

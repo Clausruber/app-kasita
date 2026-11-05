@@ -1,112 +1,77 @@
-import { FEATURES } from "@/lib/vehicle-catalog";
+import GUADALAJARA from "@/lib/demo-guadalajara.json";
 
-// Test inventory for Inventario → Datos de prueba: 50 units marked `demo: true` so they can be wiped in one go.
-// Values are fixed per index (no Math.random) so every load produces the same lot.
+// Test listings for Propiedades → Datos de prueba: 30 fictitious properties in the Guadalajara metro area
+// (70 % residential), each with map coordinates. Loaded with `demo: true` so they can be wiped in one go.
+// Coordinates are approximate (colonia centre plus a small fixed offset), never a real address.
 
-type Base = [brand: string, model: string, trim: string, bodyType: string, fuel: string, transmission: string, traction: string, engine: string, newPrice: number, doors: number];
+const STREETS = ["Av. Vallarta", "Av. Chapultepec", "Av. México", "Av. Patria", "Calle Libertad", "Av. Américas"];
 
-const MODELS: Base[] = [
-  ["Nissan", "Versa", "Advance", "Sedán", "Gasolina", "CVT", "Delantera", "1.6", 340_000, 4],
-  ["Nissan", "Sentra", "Exclusive", "Sedán", "Gasolina", "CVT", "Delantera", "2.0", 480_000, 4],
-  ["Nissan", "March", "Sense", "Hatchback", "Gasolina", "Manual", "Delantera", "1.6", 270_000, 5],
-  ["Nissan", "Kicks", "Advance", "SUV", "Gasolina", "CVT", "Delantera", "1.6", 430_000, 5],
-  ["Nissan", "X-Trail", "Exclusive", "SUV", "Gasolina", "CVT", "AWD", "2.5", 690_000, 5],
-  ["Nissan", "NP300", "Doble Cabina SE", "Pick-Up", "Diésel", "Manual", "4x4", "2.5", 560_000, 4],
-  ["Chevrolet", "Aveo", "LT", "Sedán", "Gasolina", "Automática", "Delantera", "1.5", 290_000, 4],
-  ["Chevrolet", "Onix", "Premier", "Sedán", "Gasolina", "Automática", "Delantera", "1.0", 350_000, 4],
-  ["Chevrolet", "Tracker", "Premier", "SUV", "Gasolina", "Automática", "Delantera", "1.2", 480_000, 5],
-  ["Chevrolet", "Silverado", "LT Crew Cab", "Pick-Up", "Gasolina", "Automática", "4x4", "5.3", 1_050_000, 4],
-  ["Chevrolet", "Tahoe", "Premier", "SUV", "Gasolina", "Automática", "4x4", "5.3", 1_650_000, 5],
-  ["Volkswagen", "Jetta", "Comfortline", "Sedán", "Gasolina", "Automática", "Delantera", "1.4", 480_000, 4],
-  ["Volkswagen", "Vento", "Highline", "Sedán", "Gasolina", "Automática", "Delantera", "1.6", 340_000, 4],
-  ["Volkswagen", "Polo", "Comfortline", "Hatchback", "Gasolina", "Manual", "Delantera", "1.6", 320_000, 5],
-  ["Volkswagen", "Tiguan", "Comfortline", "SUV", "Gasolina", "Automática", "Delantera", "1.4", 650_000, 5],
-  ["Volkswagen", "Taos", "Highline", "SUV", "Gasolina", "Automática", "Delantera", "1.4", 600_000, 5],
-  ["Toyota", "Corolla", "SE", "Sedán", "Gasolina", "CVT", "Delantera", "2.0", 470_000, 4],
-  ["Toyota", "Corolla", "Hybrid", "Sedán", "Híbrido", "CVT", "Delantera", "1.8", 520_000, 4],
-  ["Toyota", "Yaris", "S", "Sedán", "Gasolina", "CVT", "Delantera", "1.5", 330_000, 4],
-  ["Toyota", "RAV4", "XLE", "SUV", "Gasolina", "Automática", "AWD", "2.5", 720_000, 5],
-  ["Toyota", "Hilux", "SR Doble Cabina", "Pick-Up", "Gasolina", "Manual", "Trasera", "2.7", 560_000, 4],
-  ["Toyota", "Tacoma", "TRD Sport", "Pick-Up", "Gasolina", "Automática", "4x4", "3.5", 850_000, 4],
-  ["Toyota", "Sienna", "XLE Hybrid", "Minivan", "Híbrido", "CVT", "Delantera", "2.5", 1_050_000, 5],
-  ["Honda", "Civic", "Touring", "Sedán", "Gasolina", "CVT", "Delantera", "1.5", 590_000, 4],
-  ["Honda", "City", "Sport", "Sedán", "Gasolina", "CVT", "Delantera", "1.5", 380_000, 4],
-  ["Honda", "HR-V", "Touring", "SUV", "Gasolina", "CVT", "Delantera", "1.8", 520_000, 5],
-  ["Honda", "CR-V", "Touring", "SUV", "Gasolina", "CVT", "AWD", "1.5", 760_000, 5],
-  ["Honda", "Odyssey", "Touring", "Minivan", "Gasolina", "Automática", "Delantera", "3.5", 1_000_000, 5],
-  ["Mazda", "Mazda 2", "i Grand Touring", "Hatchback", "Gasolina", "Automática", "Delantera", "1.5", 340_000, 5],
-  ["Mazda", "Mazda 3", "i Sport", "Sedán", "Gasolina", "Automática", "Delantera", "2.5", 470_000, 4],
-  ["Mazda", "CX-30", "i Grand Touring", "SUV", "Gasolina", "Automática", "Delantera", "2.5", 560_000, 5],
-  ["Mazda", "CX-5", "Signature", "SUV", "Gasolina", "Automática", "AWD", "2.5", 730_000, 5],
-  ["Mazda", "MX-5", "RF", "Convertible", "Gasolina", "Manual", "Trasera", "2.0", 650_000, 2],
-  ["Kia", "Rio", "EX", "Sedán", "Gasolina", "Automática", "Delantera", "1.6", 340_000, 4],
-  ["Kia", "Forte", "GT Line", "Sedán", "Gasolina", "CVT", "Delantera", "2.0", 440_000, 4],
-  ["Kia", "Seltos", "SX", "SUV", "Gasolina", "Automática", "Delantera", "1.6", 530_000, 5],
-  ["Kia", "Sportage", "SXL", "SUV", "Gasolina", "Automática", "AWD", "2.5", 700_000, 5],
-  ["Hyundai", "Grand i10", "GLS", "Hatchback", "Gasolina", "Manual", "Delantera", "1.2", 260_000, 5],
-  ["Hyundai", "Elantra", "Limited", "Sedán", "Gasolina", "CVT", "Delantera", "2.0", 480_000, 4],
-  ["Hyundai", "Tucson", "Limited", "SUV", "Híbrido", "Automática", "AWD", "1.6", 760_000, 5],
-  ["Ford", "Ranger", "XLT", "Pick-Up", "Diésel", "Automática", "4x4", "2.0", 780_000, 4],
-  ["Ford", "Lobo", "Lariat", "Pick-Up", "Gasolina", "Automática", "4x4", "3.5", 1_250_000, 4],
-  ["Ford", "Mustang", "GT", "Coupé", "Gasolina", "Automática", "Trasera", "5.0", 1_100_000, 2],
-  ["Ford", "Explorer", "Limited", "SUV", "Gasolina", "Automática", "AWD", "2.3", 1_000_000, 5],
-  ["Jeep", "Wrangler", "Rubicon", "SUV", "Gasolina", "Automática", "4x4", "2.0", 1_150_000, 4],
-  ["Jeep", "Compass", "Limited", "SUV", "Gasolina", "Automática", "Delantera", "1.3", 620_000, 5],
-  ["RAM", "700", "Bighorn", "Pick-Up", "Gasolina", "Manual", "Delantera", "1.3", 360_000, 2],
-  ["BMW", "Serie 3", "330i Sport Line", "Sedán", "Gasolina", "Automática", "Trasera", "2.0", 1_050_000, 4],
-  ["Audi", "Q5", "Elite", "SUV", "Gasolina", "Automática secuencial", "AWD", "2.0", 1_150_000, 5],
-  ["Tesla", "Model 3", "Long Range", "Sedán", "Eléctrico", "Automática", "AWD", "", 1_000_000, 4],
-];
-
-const COLORS = ["Blanco", "Negro", "Gris", "Plata", "Rojo", "Azul", "Blanco", "Gris", "Vino", "Beige"];
-const CITIES: [string, string][] = [
-  ["Ciudad de México", "Ciudad de México"],
-  ["Jalisco", "Guadalajara"],
-  ["Nuevo León", "Monterrey"],
-  ["Puebla", "Puebla"],
-  ["Querétaro", "Querétaro"],
-  ["Estado de México", "Naucalpan"],
-];
-const CURRENT_YEAR = new Date().getFullYear();
-
-/** The i-th demo unit as API input (passes through parseVehicleInput like any other car). */
-export function demoVehicle(i: number) {
-  const [brand, model, trim, bodyType, fuel, transmission, traction, engine, newPrice, doors] = MODELS[i % MODELS.length];
-  const isNew = i % 9 === 0;
-  const age = isNew ? 0 : 1 + ((i * 7) % 9); // 1..9 years old
-  const year = CURRENT_YEAR - age;
-  const km = isNew ? 0 : age * (11_000 + ((i * 3_137) % 9_000)) + ((i * 613) % 5_000);
-  // ~12% depreciation per year, rounded to the nearest $5,000.
-  const price = Math.round((newPrice * Math.pow(0.88, age)) / 5_000) * 5_000;
-  const [state, city] = CITIES[i % CITIES.length];
-  const color = COLORS[(i * 3) % COLORS.length];
-  const features = FEATURES.filter((_, f) => (f * 5 + i) % 3 !== 0 || f < 3).slice(0, 6 + (i % 10));
-  const intake = new Date(Date.now() - ((i * 37) % 120) * 86_400_000); // 0–120 days on the lot
+/** The i-th demo property as API input (passes through parsePropertyInput like any other listing). */
+export function demoProperty(i: number) {
+  const p = GUADALAJARA[i]; // `category` (residencial/comercial) is ignored by parsePropertyInput
+  const intake = new Date(Date.now() - ((i * 37) % 120) * 86_400_000); // 0–120 days on the market
+  const rents = p.operation !== "venta";
   return {
-    status: i % 12 === 11 ? "borrador" : "disponible",
-    brand,
-    model,
-    trim,
-    year,
-    km,
-    price,
-    condition: isNew ? "nuevo" : "usado",
-    bodyType,
-    fuel,
-    transmission,
-    traction,
-    engine,
-    doors,
-    color,
-    singleOwner: i % 3 === 0,
-    location: { state, city },
-    description: `${brand} ${model} ${trim} ${year} color ${color.toLowerCase()}, ${isNew ? "nuevo" : `${km.toLocaleString("es-MX")} km`}. ${
-      i % 2 ? "Servicios de agencia al corriente." : "Excelentes condiciones, listo para entrega."
-    } Unidad de prueba (datos ficticios).`,
-    features,
-    stockNumber: `DEMO-${String(i + 1).padStart(3, "0")}`,
+    ...p,
+    yearBuilt: p.propertyType === "Terreno" ? null : new Date().getFullYear() - ((i * 3) % 25),
+    availableFrom: rents ? new Date(Date.now() + ((i * 5) % 45) * 86_400_000).toISOString() : null,
+    address: p.propertyType === "Terreno" ? "" : `${STREETS[i % STREETS.length]} ${100 + ((i * 37) % 900)}`,
+    unit: p.propertyType === "Departamento" || p.propertyType === "Oficina" ? `${p.floor}0${1 + (i % 4)}` : "",
+    ownerName: "Propietario de prueba",
+    ownerPhone: "",
     intakeDate: intake.toISOString(),
   };
 }
 
-export const DEMO_COUNT = 50;
+export const DEMO_COUNT = GUADALAJARA.length;
+
+// Stock photos in /public/demo-photos (Unsplash License, see CREDITS.md) with their pixel size.
+export const DEMO_PHOTO_SIZE: Record<string, [number, number]> = {
+  "sala-1": [1600, 900], "sala-2": [1067, 1600], "sala-3": [1600, 846],
+  "cocina-1": [1600, 900], "cocina-2": [1600, 1280],
+  "recamara-1": [1600, 1067], "recamara-2": [1600, 1600],
+  "bano-1": [1200, 1600], "bano-2": [1200, 1600],
+  "casa-1": [1600, 900], "casa-2": [1600, 1060], "casa-3": [1600, 1200], "casa-4": [1600, 1600],
+  "edificio-1": [1600, 1067], "edificio-2": [1600, 1600],
+  "alberca-1": [1600, 900], "gimnasio-1": [1600, 900], "gimnasio-2": [1600, 1067],
+  "local-1": [1600, 1100], "local-2": [1067, 1600],
+  "oficina-1": [1600, 1067], "oficina-2": [1600, 1067],
+  "bodega-1": [1600, 1067], "bodega-2": [1600, 1067],
+  "terreno-1": [1600, 900],
+};
+
+const pick = (list: string[], i: number) => list[i % list.length];
+
+/** Photo names for the i-th demo property, cover first; deterministic so every load looks the same. */
+export function demoPhotos(i: number): string[] {
+  const p = GUADALAJARA[i];
+  const has = (a: string) => (p.amenities as string[]).includes(a);
+  const amenity = [has("Alberca") ? "alberca-1" : "", has("Gimnasio") ? pick(["gimnasio-1", "gimnasio-2"], i) : ""].filter(Boolean);
+  switch (p.propertyType) {
+    case "Departamento":
+      return [
+        pick(["sala-1", "sala-3"], i),
+        pick(["cocina-2", "cocina-1"], i),
+        pick(["recamara-1", "recamara-2"], i),
+        pick(["bano-1", "bano-2"], i),
+        ...(amenity.length ? amenity.slice(0, 1) : [pick(["edificio-1", "edificio-2"], i)]),
+      ];
+    case "Casa":
+    case "Casa en condominio":
+      return [
+        pick(["casa-1", "casa-4", "casa-2", "casa-3"], i),
+        pick(["sala-3", "sala-1", "sala-2"], i),
+        pick(["cocina-2", "cocina-1"], i),
+        pick(["recamara-2", "recamara-1"], i),
+        ...amenity.slice(0, 1),
+      ];
+    case "Local comercial":
+      return [pick(["local-1", "local-2"], i), pick(["local-2", "local-1"], i)];
+    case "Oficina":
+      return [pick(["oficina-1", "oficina-2"], i), pick(["oficina-2", "oficina-1"], i), pick(["edificio-2", "edificio-1"], i)];
+    case "Bodega":
+      return [pick(["bodega-1", "bodega-2"], i), pick(["bodega-2", "bodega-1"], i)];
+    default: // Terreno
+      return ["terreno-1"];
+  }
+}

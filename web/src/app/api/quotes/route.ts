@@ -6,7 +6,7 @@ import { clientDoc, conversationMessagesCol, quotesCol } from "@/lib/firebase/pa
 import { authorKeyOf, clientIdOf } from "@/lib/clients";
 import { createQuote, getQuote, parseQuoteInput, quoteFileName, toQuoteRow, type QuoteDoc } from "@/lib/quotes-server";
 
-// Quotes: up to 5 cars, optional financing and trade-in, shared as a public link (/c/{token});
+// Quotes: up to 5 properties, optional mortgage simulation, shared as a public link (/c/{token});
 // the PDF is rendered only when downloaded (api/quotes/[id]/pdf).
 
 /** History: for a client or a conversation, or the latest of the workspace (optionally by status). */

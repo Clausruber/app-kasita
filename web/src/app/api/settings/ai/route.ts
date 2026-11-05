@@ -7,6 +7,9 @@ import { AI_MODES, readAiSettings, type AiMode, type AiSettings } from "@/lib/op
 
 const MAX = { instructions: 4000, field: 2000 };
 const clip = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+// Up to 20 distinct words or short phrases, trimmed; "" entries (trailing commas while typing) dropped.
+const keywords = (v: unknown) =>
+  [...new Set((Array.isArray(v) ? v : []).filter((k): k is string => typeof k === "string").map((k) => k.trim().slice(0, 40)).filter(Boolean))].slice(0, 20);
 
 export const GET = withUser(async (_req, user) => NextResponse.json(await readAiSettings(user.uid)));
 
@@ -34,13 +37,17 @@ export const PUT = withUser(async (req, user) => {
           never: clip(body.brand.never, MAX.field),
         }
       : current.brand,
+    quoteKeywords: body.quoteKeywords !== undefined ? keywords(body.quoteKeywords) : current.quoteKeywords,
+    quoteKeywordsOnly: body.quoteKeywordsOnly !== undefined ? body.quoteKeywordsOnly === true : current.quoteKeywordsOnly,
   };
+  if (next.quoteKeywordsOnly && !next.quoteKeywords.length)
+    throw new HttpError(400, "Agrega al menos una palabra clave o desactiva «Solo con palabra clave»");
 
   if (next.mode !== "off" && (!next.hasKey || !next.textModel))
     throw new HttpError(400, "El administrador aún no ha configurado la IA (API key de OpenRouter y modelo)");
 
-  const { mode, instructions, brand } = next;
-  await adminDb.doc(userDoc(user.uid)).set({ ai: { mode, instructions, brand } }, { merge: true });
+  const { mode, instructions, brand, quoteKeywords, quoteKeywordsOnly } = next;
+  await adminDb.doc(userDoc(user.uid)).set({ ai: { mode, instructions, brand, quoteKeywords, quoteKeywordsOnly } }, { merge: true });
   // The compiled manual embeds instructions and brand profile: flag it for regeneration when they change.
   if (JSON.stringify([current.instructions, current.brand]) !== JSON.stringify([next.instructions, next.brand])) {
     const k = adminDb.doc(aiKnowledgeDoc(user.uid));

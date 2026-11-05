@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, Car, ChevronDown, Link2, Plus, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Building2, ChevronDown, Images, Link2, Plus, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { MAX_CATALOG_VEHICLES, QUOTE_DEFAULTS, TERM_OPTIONS, quoteFor, type Financing, type QuoteDefaults } from "@/lib/quote-math";
-import { BODY_TYPES, TRANSMISSIONS, money } from "@/lib/vehicle-catalog";
-import type { Client, Vehicle } from "@/lib/types";
-import { useVehicles } from "@/hooks/use-vehicles";
+import { MAX_CATALOG_PROPERTIES, MAX_QUOTE_PHOTOS, QUOTE_DEFAULTS, TERM_OPTIONS, quoteFor, termLabel, type Financing, type QuoteDefaults } from "@/lib/quote-math";
+import { OPERATIONS, PROPERTY_TYPES, forRent, forSale, mainPrice, money, priceLine, specsLine } from "@/lib/property-catalog";
+import type { Client, Property } from "@/lib/types";
+import { useProperties } from "@/hooks/use-properties";
 import { HoldWarning } from "@/components/inventory/hold-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,7 +18,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-export type QuotePrefill = { vehicleIds?: string[]; clientId?: string | null; clientName?: string; clientWhatsapp?: string; conversationId?: string | null; dealId?: string | null };
+export type QuotePrefill = {
+  propertyIds?: string[];
+  clientId?: string | null;
+  clientName?: string;
+  clientWhatsapp?: string;
+  conversationId?: string | null;
+  dealId?: string | null;
+};
 
 /** A quote as the API returns it (list, create). `path` is the public page (/c/{token}). */
 export type QuoteRow = {
@@ -29,11 +36,15 @@ export type QuoteRow = {
   views: number;
   lastViewedAt: string | null;
   validUntil: string;
-  accepted: { vehicleTitle: string; downPct: number; months: number | null; tradeIn?: { description: string; value: number } | null } | null;
+  accepted: {
+    propertyTitle: string;
+    downPct: number | null;
+    months: number | null;
+  } | null;
   clientId: string | null;
   clientName: string;
   clientWhatsapp: string;
-  vehicles: { id: string; title: string; price: number }[];
+  properties: { id: string; title: string; price: number; rent?: boolean }[];
   financing: boolean;
   sellerName: string;
   createdAt: string | null;
@@ -41,17 +52,35 @@ export type QuoteRow = {
 };
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-const titleOf = (v: Vehicle) => v.title || `${v.brand} ${v.model} ${v.year}`;
+const titleOf = (v: Property) => v.title || v.propertyType;
 const select = "h-8 w-full rounded-lg border bg-background px-2 text-sm";
 
 /** Defaults for the financing section (Ajustes → Empresa → Cotizaciones). */
 export function useQuoteDefaults() {
   const { user } = useAuth();
-  return useQuery({ queryKey: ["quote-defaults", user?.uid], enabled: !!user, queryFn: () => api<QuoteDefaults>("/api/settings/quotes") });
+  return useQuery({
+    queryKey: ["quote-defaults", user?.uid],
+    enabled: !!user,
+    queryFn: () => api<QuoteDefaults>("/api/settings/quotes"),
+  });
 }
 
-type Filters = { brand: string; body: string; transmission: string; priceMin: string; priceMax: string; yearMin: string; kmMax: string };
-const NO_FILTERS: Filters = { brand: "", body: "", transmission: "", priceMin: "", priceMax: "", yearMin: "", kmMax: "" };
+type Filters = {
+  type: string;
+  operation: string;
+  city: string;
+  bedroomsMin: string;
+  priceMin: string;
+  priceMax: string;
+};
+const NO_FILTERS: Filters = {
+  type: "",
+  operation: "",
+  city: "",
+  bedroomsMin: "",
+  priceMin: "",
+  priceMax: "",
+};
 
 /**
  * Quote form shared by the catalog drawer (`variant="compact"`) and the Cotizaciones page (`"full"`:
@@ -74,62 +103,88 @@ export function QuoteBuilder({
 }) {
   const full = variant === "full";
   const qc = useQueryClient();
-  const inventory = useVehicles(enabled);
+  const inventory = useProperties(enabled);
   const defaults = useQuoteDefaults().data ?? QUOTE_DEFAULTS;
-  const clients = useQuery({ queryKey: ["clients"], enabled: enabled && full, queryFn: () => api<{ clients: Client[] }>("/api/clients") });
+  const clients = useQuery({
+    queryKey: ["clients"],
+    enabled: enabled && full,
+    queryFn: () => api<{ clients: Client[] }>("/api/clients"),
+  });
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const setFilter = (k: keyof Filters, v: string) => setFilters((f) => ({ ...f, [k]: v }));
-  const [picked, setPicked] = useState<string[]>(prefill?.vehicleIds?.slice(0, MAX_CATALOG_VEHICLES) ?? []);
-  const [client, setClient] = useState({ id: prefill?.clientId ?? null, name: prefill?.clientName ?? "", whatsapp: prefill?.clientWhatsapp ?? "" });
+  const [picked, setPicked] = useState<string[]>(prefill?.propertyIds?.slice(0, MAX_CATALOG_PROPERTIES) ?? []);
+  const [client, setClient] = useState({
+    id: prefill?.clientId ?? null,
+    name: prefill?.clientName ?? "",
+    whatsapp: prefill?.clientWhatsapp ?? "",
+  });
   const [clientQuery, setClientQuery] = useState("");
   const [withFinancing, setWithFinancing] = useState(false);
   const [allowSimulation, setAllowSimulation] = useState(true);
   // null = not edited yet: follow the saved defaults.
   const [fin, setFin] = useState<Financing | null>(null);
-  const financing: Financing = fin ?? { downMode: "pct", down: defaults.minDownPct, rate: defaults.rate, terms: defaults.terms, ivaOnInterest: defaults.ivaOnInterest };
+  const financing: Financing = fin ?? {
+    downMode: "pct",
+    down: defaults.minDownPct,
+    rate: defaults.rate,
+    terms: defaults.terms,
+  };
   const setF = <K extends keyof Financing>(k: K, v: Financing[K]) => setFin({ ...financing, [k]: v });
-  const [withTrade, setWithTrade] = useState(false);
-  const [trade, setTrade] = useState({ description: "", value: 0 });
   const [validDays, setValidDays] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // propertyId → photo URLs chosen for the quote (in order). Not set: the first MAX_QUOTE_PHOTOS.
+  const [photoSel, setPhotoSel] = useState<Record<string, string[]>>({});
+  // Unchecked: the PDF uses each property's first MAX_QUOTE_PHOTOS photos.
+  const [withPhotos, setWithPhotos] = useState(false);
+  const photosOf = (v: Property) => photoSel[v.id] ?? v.photos.slice(0, MAX_QUOTE_PHOTOS).map((p) => p.url);
+  const togglePhoto = (v: Property, url: string) => {
+    const cur = photosOf(v);
+    if (cur.includes(url))
+      return setPhotoSel((m) => ({
+        ...m,
+        [v.id]: cur.filter((u) => u !== url),
+      }));
+    if (cur.length >= MAX_QUOTE_PHOTOS) return toast.error(`Máximo ${MAX_QUOTE_PHOTOS} fotos por propiedad`);
+    setPhotoSel((m) => ({ ...m, [v.id]: [...cur, url] }));
+  };
 
-  const available = useMemo(() => (inventory.data?.vehicles ?? []).filter((v) => v.status === "disponible" || v.status === "apartado"), [inventory.data]);
-  const brands = useMemo(() => [...new Set(available.map((v) => v.brand).filter(Boolean))].sort(), [available]);
+  const available = useMemo(() => (inventory.data?.properties ?? []).filter((v) => v.status === "disponible" || v.status === "apartado"), [inventory.data]);
+  const cities = useMemo(() => [...new Set(available.map((v) => v.location.city).filter(Boolean))].sort(), [available]);
   const byId = useMemo(() => new Map(available.map((v) => [v.id, v])), [available]);
-  const chosen = picked.map((id) => byId.get(id)).filter((v): v is Vehicle => !!v);
+  const chosen = picked.map((id) => byId.get(id)).filter((v): v is Property => !!v);
   const results = useMemo(() => {
     const words = norm(q).split(/\s+/).filter(Boolean);
     const n = (s: string) => (s ? Number(s) : null);
-    const [pMin, pMax, yMin, kMax] = [n(filters.priceMin), n(filters.priceMax), n(filters.yearMin), n(filters.kmMax)];
+    const [pMin, pMax, bMin] = [n(filters.priceMin), n(filters.priceMax), n(filters.bedroomsMin)];
+    // Prices filter by monthly rent when browsing rentals, else by sale price.
+    const priceOf = (v: Property) => (filters.operation === "renta" ? v.rentPrice : mainPrice(v)) ?? 0;
     return available
       .filter((v) => !picked.includes(v.id))
       .filter((v) => {
-        const text = norm([v.title, v.brand, v.model, v.trim, v.year, v.color, v.bodyType, v.transmission, v.fuel, v.stockNumber].join(" "));
+        const text = norm([v.title, v.propertyType, v.development, v.location.neighborhood, v.location.city, v.stockNumber].join(" "));
         if (!words.every((w) => text.includes(w))) return false;
-        if (filters.brand && v.brand !== filters.brand) return false;
-        if (filters.body && v.bodyType !== filters.body) return false;
-        if (filters.transmission && v.transmission !== filters.transmission) return false;
-        if (pMin !== null && v.price < pMin) return false;
-        if (pMax !== null && v.price > pMax) return false;
-        if (yMin !== null && v.year < yMin) return false;
-        if (kMax !== null && v.km > kMax) return false;
+        if (filters.type && v.propertyType !== filters.type) return false;
+        if (filters.operation === "venta" && !forSale(v.operation)) return false;
+        if (filters.operation === "renta" && !forRent(v.operation)) return false;
+        if (filters.city && v.location.city !== filters.city) return false;
+        if (bMin !== null && v.bedrooms < bMin) return false;
+        if (pMin !== null && priceOf(v) < pMin) return false;
+        if (pMax !== null && priceOf(v) > pMax) return false;
         return true;
       })
-      .sort((a, b) => a.price - b.price)
+      .sort((a, b) => priceOf(a) - priceOf(b))
       .slice(0, full ? 60 : 30);
   }, [available, picked, q, filters, full]);
-  const isFull = picked.length >= MAX_CATALOG_VEHICLES;
+  const isFull = picked.length >= MAX_CATALOG_PROPERTIES;
   const clientMatches = useMemo(() => {
     const term = norm(clientQuery.trim());
     if (!term) return [];
-    return (clients.data?.clients ?? [])
-      .filter((c) => norm([c.firstName, c.lastName, c.displayName, c.username, c.whatsapp].join(" ")).includes(term))
-      .slice(0, 6);
+    return (clients.data?.clients ?? []).filter((c) => norm([c.firstName, c.lastName, c.displayName, c.username, c.whatsapp].join(" ")).includes(term)).slice(0, 6);
   }, [clients.data, clientQuery]);
 
-  const add = (id: string) => (isFull ? toast.error(`Máximo ${MAX_CATALOG_VEHICLES} autos`) : setPicked((p) => [...p, id]));
+  const add = (id: string) => (isFull ? toast.error(`Máximo ${MAX_CATALOG_PROPERTIES} propiedades`) : setPicked((p) => [...p, id]));
   const move = (i: number, d: -1 | 1) =>
     setPicked((p) => {
       const next = [...p];
@@ -143,14 +198,14 @@ export function QuoteBuilder({
       const row = await api<QuoteRow>("/api/quotes", {
         method: "POST",
         body: {
-          vehicleIds: chosen.map((v) => v.id),
+          propertyIds: chosen.map((v) => v.id),
+          photos: withPhotos ? Object.fromEntries(chosen.map((v) => [v.id, photosOf(v)])) : {},
           clientId: client.id,
           clientName: client.name.trim(),
           clientWhatsapp: client.whatsapp.trim(),
           conversationId: prefill?.conversationId ?? null,
           dealId: prefill?.dealId ?? null,
           financing: withFinancing ? financing : null,
-          tradeIn: withTrade && trade.value > 0 ? trade : null,
           allowSimulation,
           validDays: validDays ?? defaults.validDays,
           notes,
@@ -171,12 +226,12 @@ export function QuoteBuilder({
         {/* Selected */}
         <section className="space-y-1.5">
           <Label>
-            Autos seleccionados ({chosen.length}/{MAX_CATALOG_VEHICLES})
+            Propiedades seleccionadas ({chosen.length}/{MAX_CATALOG_PROPERTIES})
           </Label>
-          {!chosen.length && <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">Busca y agrega autos abajo.</p>}
+          {!chosen.length && <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">Busca y agrega propiedades abajo.</p>}
           <ul className="space-y-1.5">
             {chosen.map((v, i) => {
-              const qt = withFinancing ? quoteFor(v.price, financing, withTrade ? trade : null, defaults.minDownPct) : null;
+              const qt = withFinancing && forSale(v.operation) && v.salePrice ? quoteFor(v.salePrice, financing, defaults.minDownPct) : null;
               const mid = qt?.rows[Math.floor((qt.rows.length - 1) / 2)];
               return (
                 <li key={v.id} className="flex items-center gap-2 rounded-lg border p-1.5">
@@ -184,8 +239,8 @@ export function QuoteBuilder({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{titleOf(v)}</p>
                     <p className="text-xs text-muted-foreground">
-                      {money(v.price)}
-                      {mid && mid.payment > 0 && ` · ${money(mid.payment)}/mes a ${mid.months}`}
+                      {priceLine(v)}
+                      {mid && mid.payment > 0 && ` · crédito ${money(mid.payment)}/mes a ${termLabel(mid.months)}`}
                     </p>
                     {qt?.warnings.map((w) => (
                       <p key={w} className="text-[11px] text-amber-700 dark:text-amber-300">
@@ -215,38 +270,39 @@ export function QuoteBuilder({
         <section className="space-y-2">
           <div className="relative">
             <Search className="absolute top-2 left-2 size-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Buscar marca, modelo, año, color…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input className="pl-8" placeholder="Buscar colonia, desarrollo, clave…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           {full && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <select aria-label="Marca" className={select} value={filters.brand} onChange={(e) => setFilter("brand", e.target.value)}>
-                <option value="">Todas las marcas</option>
-                {brands.map((b) => (
-                  <option key={b}>{b}</option>
-                ))}
-              </select>
-              <select aria-label="Carrocería" className={select} value={filters.body} onChange={(e) => setFilter("body", e.target.value)}>
-                <option value="">Carrocería</option>
-                {BODY_TYPES.map((b) => (
-                  <option key={b}>{b}</option>
-                ))}
-              </select>
-              <select aria-label="Transmisión" className={select} value={filters.transmission} onChange={(e) => setFilter("transmission", e.target.value)}>
-                <option value="">Transmisión</option>
-                {TRANSMISSIONS.map((t) => (
+              <select aria-label="Tipo" className={select} value={filters.type} onChange={(e) => setFilter("type", e.target.value)}>
+                <option value="">Todos los tipos</option>
+                {PROPERTY_TYPES.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
               </select>
-              <Input type="number" min={1950} placeholder="Año desde" value={filters.yearMin} onChange={(e) => setFilter("yearMin", e.target.value)} />
+              <select aria-label="Operación" className={select} value={filters.operation} onChange={(e) => setFilter("operation", e.target.value)}>
+                <option value="">Venta y renta</option>
+                {OPERATIONS.filter((o) => o.id !== "venta_renta").map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select aria-label="Ciudad" className={select} value={filters.city} onChange={(e) => setFilter("city", e.target.value)}>
+                <option value="">Todas las ciudades</option>
+                {cities.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+              <Input type="number" min={0} placeholder="Recámaras mín." value={filters.bedroomsMin} onChange={(e) => setFilter("bedroomsMin", e.target.value)} />
               <Input type="number" min={0} placeholder="Precio mín." value={filters.priceMin} onChange={(e) => setFilter("priceMin", e.target.value)} />
               <Input type="number" min={0} placeholder="Precio máx." value={filters.priceMax} onChange={(e) => setFilter("priceMax", e.target.value)} />
-              <Input type="number" min={0} placeholder="Km máx." value={filters.kmMax} onChange={(e) => setFilter("kmMax", e.target.value)} />
               <Button variant="ghost" size="sm" disabled={JSON.stringify(filters) === JSON.stringify(NO_FILTERS) && !q} onClick={() => (setFilters(NO_FILTERS), setQ(""))}>
                 Limpiar filtros
               </Button>
             </div>
           )}
-          {inventory.isLoading && <p className="text-xs text-muted-foreground">Cargando inventario…</p>}
+          {inventory.isLoading && <p className="text-xs text-muted-foreground">Cargando propiedades…</p>}
           {inventory.error && <p className="text-xs text-destructive">{(inventory.error as Error).message}</p>}
           <ul className={cn("space-y-1 overflow-y-auto", full ? "grid max-h-[28rem] gap-2 space-y-0 sm:grid-cols-2" : "max-h-64")}>
             {results.map((v) => (
@@ -261,7 +317,7 @@ export function QuoteBuilder({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm">{titleOf(v)}</span>
                     <span className="block text-xs text-muted-foreground">
-                      {money(v.price)} · {v.km ? `${v.km.toLocaleString("es-MX")} km` : "0 km"}
+                      {priceLine(v)} · {specsLine(v) || v.propertyType}
                       {v.status === "apartado" && " · apartado"}
                     </span>
                   </span>
@@ -298,7 +354,11 @@ export function QuoteBuilder({
                           type="button"
                           className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
                           onClick={() => {
-                            setClient({ id: c.id, name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.displayName, whatsapp: c.whatsapp });
+                            setClient({
+                              id: c.id,
+                              name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.displayName,
+                              whatsapp: c.whatsapp,
+                            });
                             setClientQuery("");
                           }}
                         >
@@ -323,7 +383,7 @@ export function QuoteBuilder({
         {/* Financing */}
         <section className="space-y-2 rounded-lg border p-3">
           <label className="flex items-center gap-2 font-medium">
-            <Checkbox checked={withFinancing} onCheckedChange={(c) => setWithFinancing(c === true)} /> Incluir financiamiento
+            <Checkbox checked={withFinancing} onCheckedChange={(c) => setWithFinancing(c === true)} /> Incluir crédito hipotecario (propiedades en venta)
           </label>
           {withFinancing && (
             <div className="space-y-3 pt-1">
@@ -332,7 +392,12 @@ export function QuoteBuilder({
                   <Label htmlFor="qb-down">Enganche</Label>
                   <div className="flex gap-1">
                     <Input id="qb-down" type="number" min={0} value={financing.down} onChange={(e) => setF("down", Number(e.target.value))} />
-                    <select aria-label="Tipo de enganche" className="h-8 rounded-lg border bg-background px-1 text-sm" value={financing.downMode} onChange={(e) => setF("downMode", e.target.value as Financing["downMode"])}>
+                    <select
+                      aria-label="Tipo de enganche"
+                      className="h-8 rounded-lg border bg-background px-1 text-sm"
+                      value={financing.downMode}
+                      onChange={(e) => setF("downMode", e.target.value as Financing["downMode"])}
+                    >
                       <option value="pct">%</option>
                       <option value="amount">$</option>
                     </select>
@@ -344,7 +409,7 @@ export function QuoteBuilder({
                 </div>
               </div>
               <div className="space-y-1">
-                <Label>Plazos (meses)</Label>
+                <Label>Plazos</Label>
                 <div className="flex flex-wrap gap-1.5">
                   {TERM_OPTIONS.map((t) => {
                     const on = financing.terms.includes(t);
@@ -355,31 +420,65 @@ export function QuoteBuilder({
                         onClick={() => setF("terms", on ? financing.terms.filter((x) => x !== t) : [...financing.terms, t].sort((a, b) => a - b))}
                         className={cn("rounded-md border px-2.5 py-1 text-xs", on ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted")}
                       >
-                        {t}
+                        {termLabel(t)}
                       </button>
                     );
                   })}
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={financing.ivaOnInterest} onCheckedChange={(c) => setF("ivaOnInterest", c === true)} /> IVA sobre intereses
-              </label>
             </div>
           )}
           <label className="flex items-center gap-2 text-xs">
-            <Checkbox checked={allowSimulation} onCheckedChange={(c) => setAllowSimulation(c === true)} /> Permitir que el cliente simule el financiamiento en el link
+            <Checkbox checked={allowSimulation} onCheckedChange={(c) => setAllowSimulation(c === true)} /> Permitir que el cliente simule su crédito en el link
           </label>
-        </section>
-
-        {/* Trade-in */}
-        <section className="space-y-2 rounded-lg border p-3">
-          <label className="flex items-center gap-2 font-medium">
-            <Checkbox checked={withTrade} onCheckedChange={(c) => setWithTrade(c === true)} /> Auto a cuenta
+          <label className="flex items-center gap-2 text-xs">
+            <Checkbox checked={withPhotos} onCheckedChange={(c) => setWithPhotos(c === true)} /> Agregar fotos a la cotización (elige hasta {MAX_QUOTE_PHOTOS} por propiedad)
           </label>
-          {withTrade && (
-            <div className="grid grid-cols-[1fr_8rem] gap-2">
-              <Input placeholder="Nissan Versa 2016, 120,000 km" value={trade.description} onChange={(e) => setTrade({ ...trade, description: e.target.value })} />
-              <Input type="number" min={0} placeholder="Valor $" value={trade.value || ""} onChange={(e) => setTrade({ ...trade, value: Number(e.target.value) })} />
+          {withPhotos && (
+            <div className="space-y-3 border-t pt-2">
+              {!chosen.length && <p className="text-xs text-muted-foreground">Agrega una propiedad para elegir sus fotos.</p>}
+              {chosen.map((v) => {
+                const sel = photosOf(v);
+                return (
+                  <div key={v.id} className="space-y-1.5">
+                    <p className="flex items-center gap-1 text-xs font-medium">
+                      <Images className="size-3.5 text-muted-foreground" />
+                      <span className="truncate">{titleOf(v)}</span>
+                      <span className="shrink-0 font-normal text-muted-foreground">
+                        · {sel.length}/{MAX_QUOTE_PHOTOS}
+                      </span>
+                    </p>
+                    {v.photos.length ? (
+                      <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+                        {v.photos.map((p) => {
+                          const n = sel.indexOf(p.url);
+                          return (
+                            <button
+                              key={p.path}
+                              type="button"
+                              aria-pressed={n >= 0}
+                              aria-label={n >= 0 ? `Quitar foto ${n + 1}` : "Agregar foto"}
+                              onClick={() => togglePhoto(v, p.url)}
+                              className={cn("relative aspect-[4/3] overflow-hidden rounded-md border-2", n >= 0 ? "border-primary" : "border-transparent opacity-60 hover:opacity-100")}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={p.url} alt="" className="size-full object-cover" loading="lazy" />
+                              {n >= 0 && (
+                                <span className="absolute top-0.5 left-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+                                  {n + 1}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Esta propiedad no tiene fotos.</p>
+                    )}
+                  </div>
+                );
+              })}
+              {chosen.length > 0 && <p className="text-[11px] text-muted-foreground">El número indica el orden en que salen en el PDF.</p>}
             </div>
           )}
         </section>
@@ -402,7 +501,7 @@ export function QuoteBuilder({
             </div>
             <div className="space-y-1">
               <Label htmlFor="qb-notes">Notas</Label>
-              <Textarea id="qb-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="p. ej. incluye verificación vigente" />
+              <Textarea id="qb-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="p. ej. incluye 2 lugares de estacionamiento" />
             </div>
           </div>
         </details>
@@ -422,13 +521,13 @@ export function QuoteBuilder({
   );
 }
 
-function Thumb({ v }: { v: Vehicle }) {
+function Thumb({ v }: { v: Property }) {
   return v.photos[0] ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={v.photos[0].url} alt="" className="size-11 shrink-0 rounded object-cover" />
   ) : (
     <span className="flex size-11 shrink-0 items-center justify-center rounded bg-muted">
-      <Car className="size-4 text-muted-foreground" />
+      <Building2 className="size-4 text-muted-foreground" />
     </span>
   );
 }

@@ -4,8 +4,8 @@ import { setGlobalOptions } from "firebase-functions/v2";
 initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
-export { alZernioWebhook } from "./webhook";
-export { alReplyToComment, alReplyToDm, alHideComment } from "./comments";
-export { alAgentOnComment, alAgentOnDm, alSuggestReply, alTestAgent } from "./agent";
-export { alGetSlots, alBookSlot, alConfirmBooking, alCancelBooking, alExpireHolds, alQuoteSlots, alQuoteBook } from "./agenda";
-export { alFlagStaleLeads } from "./followups";
+export { kfZernioWebhook } from "./webhook";
+export { kfReplyToComment, kfReplyToDm, kfHideComment } from "./comments";
+export { kfAgentOnComment, kfAgentOnDm, kfSuggestReply, kfTestAgent } from "./agent";
+export { kfGetSlots, kfBookSlot, kfConfirmBooking, kfCancelBooking, kfExpireHolds, kfQuoteSlots, kfQuoteBook } from "./agenda";
+export { kfFlagStaleLeads } from "./followups";

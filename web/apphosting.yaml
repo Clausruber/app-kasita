@@ -12,7 +12,7 @@ env:
   - variable: DF_AI_ENCRYPTION_KEY
     secret: DF_AI_ENCRYPTION_KEY
   - variable: NEXT_PUBLIC_APP_NAME
-    value: Autolix
+    value: Kasita
   - variable: NEXT_PUBLIC_FUNCTIONS_REGION
     value: us-central1
   # NEXT_PUBLIC_FIREBASE_* are injected automatically by App Hosting (FIREBASE_WEBAPP_CONFIG),

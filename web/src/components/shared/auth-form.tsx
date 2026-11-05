@@ -3,10 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
-  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
   updateProfile,
 } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
@@ -25,18 +23,35 @@ const ERRORS: Record<string, string> = {
   "auth/email-already-in-use": "Ese email ya está registrado: inicia sesión",
   "auth/weak-password": "La contraseña debe tener al menos 6 caracteres",
   "auth/invalid-email": "Email no válido",
-  "auth/popup-closed-by-user": "Se cerró la ventana de Google",
   "auth/too-many-requests": "Demasiados intentos. Espera unos minutos.",
 };
 
 type Mode = "login" | "register";
+
+// Fixed login while developing only (`next dev`): set NEXT_PUBLIC_DEV_LOGIN_EMAIL / _PASSWORD in
+// web/.env.local (never committed nor deployed). The inputs are then prefilled and locked.
+// Production builds always start empty.
+const DEV_LOGIN =
+  process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEV_LOGIN_EMAIL && process.env.NEXT_PUBLIC_DEV_LOGIN_PASSWORD
+    ? { email: process.env.NEXT_PUBLIC_DEV_LOGIN_EMAIL, password: process.env.NEXT_PUBLIC_DEV_LOGIN_PASSWORD }
+    : null;
+// Email suggested on the login tab (editable), e.g. the demo account. Set in .env.production.
+const LOGIN_EMAIL = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? "";
 
 /** Login and company sign-up in one card, with "Iniciar sesión" / "Crear cuenta" tabs. */
 export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   const router = useRouter();
   const { user } = useAuth();
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", whatsapp: "", company: "", password: "", confirm: "" });
+  const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
+    whatsapp: "",
+    company: "",
+    confirm: "",
+    email: initialMode === "login" ? LOGIN_EMAIL : "",
+    password: "",
+  });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const registering = useRef(false); // hold the redirect until the sign-up details are saved
@@ -68,7 +83,7 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     run(async () => {
-      if (mode === "login") return signInWithEmailAndPassword(auth, form.email, form.password);
+      if (mode === "login") return signInWithEmailAndPassword(auth, DEV_LOGIN?.email ?? form.email, DEV_LOGIN?.password ?? form.password);
       if (form.password.length < 8) throw new Error("La contraseña debe tener al menos 8 caracteres");
       if (form.password !== form.confirm) throw new Error("Las contraseñas no coinciden");
       registering.current = true;
@@ -87,6 +102,8 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   }
 
   const isLogin = mode === "login";
+  // Dev login from .env.local: locked on the login tab (sign-up keeps its own editable fields).
+  const devLocked = isLogin && !!DEV_LOGIN;
   return (
     <div className="flex flex-1 items-center justify-center p-4">
       <Card className={cn("w-full", isLogin ? "max-w-sm" : "max-w-lg")}>
@@ -141,7 +158,7 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
             <div className={cn("grid gap-3", !isLogin && "sm:grid-cols-[3fr_2fr]")}>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" required value={form.email} onChange={(e) => set("email", e.target.value)} autoComplete="email" />
+                <Input id="email" type="email" required value={devLocked ? DEV_LOGIN!.email : form.email} onChange={(e) => set("email", e.target.value)} autoComplete="email" disabled={devLocked} />
               </div>
               {!isLogin && (
                 <div className="space-y-1.5">
@@ -166,9 +183,10 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
                   type="password"
                   required
                   minLength={isLogin ? 6 : 8}
-                  value={form.password}
+                  value={devLocked ? DEV_LOGIN!.password : form.password}
                   onChange={(e) => set("password", e.target.value)}
                   autoComplete={isLogin ? "current-password" : "new-password"}
+                  disabled={devLocked}
                 />
               </div>
               {!isLogin && (
@@ -183,11 +201,6 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
               {busy ? "Un momento…" : isLogin ? "Entrar" : "Crear cuenta"}
             </Button>
           </form>
-          {isLogin && (
-            <Button variant="outline" className="w-full" disabled={busy} onClick={() => run(() => signInWithPopup(auth, new GoogleAuthProvider()))}>
-              Continuar con Google
-            </Button>
-          )}
         </CardContent>
       </Card>
     </div>

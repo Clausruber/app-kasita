@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { HttpError, withPerm } from "@/lib/auth-guard";
 import { adminAuth } from "@/lib/firebase/admin";
+import { parseAvailability } from "@/lib/agendas";
 import { normalisePerms } from "@/lib/permissions";
 import { deleteMember, getMember, parseRole, parseWhatsapp, syncIndex, toMemberRow } from "@/lib/team";
 
@@ -11,7 +12,7 @@ const notSelf = (memberId: string, actorMemberId: string | null) => {
   if (memberId === actorMemberId) throw new HttpError(400, "No puedes cambiar tu propio acceso");
 };
 
-/** Role, access items, WhatsApp and status (Activo / Inactivo) of a member. */
+/** Role, access items, WhatsApp, visit hours and status (Activo / Inactivo) of a member. */
 export const PUT = withPerm<Ctx>("settings.usuarios", async (req, user, { params }) => {
   const { id } = await params;
   notSelf(id, user.actor.memberId);
@@ -21,6 +22,7 @@ export const PUT = withPerm<Ctx>("settings.usuarios", async (req, user, { params
   if (b.role !== undefined) update.role = parseRole(b.role);
   if (b.perms !== undefined) update.perms = normalisePerms(b.perms);
   if (b.whatsapp !== undefined) update.whatsapp = parseWhatsapp(b.whatsapp);
+  if (b.availability !== undefined) update.availability = parseAvailability(b.availability);
   if (b.status !== undefined) {
     if (b.status !== "active" && b.status !== "inactive") throw new HttpError(400, "Estado no válido");
     if (snap.get("status") === "invited") throw new HttpError(400, "La persona aún no aceptó la invitación");

@@ -42,7 +42,18 @@ export async function zernio<T = unknown>(
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const msg = data && typeof data === "object" && "error" in data ? String(data.error) : `Zernio ${res.status}`;
-    throw new Error(msg);
+    throw new ZernioError(msg, res.status, data && typeof data === "object" ? (data.details ?? null) : null);
   }
   return data as T;
+}
+
+/** Zernio API error, with the HTTP status and the `details` object some endpoints add (e.g. private replies). */
+export class ZernioError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly details: Record<string, unknown> | null,
+  ) {
+    super(message);
+  }
 }

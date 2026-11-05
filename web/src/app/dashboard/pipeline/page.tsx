@@ -5,9 +5,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
-import { Car, Lock, MoreHorizontal, Phone, Plus } from "lucide-react";
+import { Building2, Lock, MoreHorizontal, Phone, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { DEAL_STAGES, GUARDED_STAGES, money } from "@/lib/vehicle-catalog";
+import { DEAL_STAGES, GUARDED_STAGES, money } from "@/lib/property-catalog";
 import type { Deal, DealStage } from "@/lib/types";
 import { useCan } from "@/hooks/use-me";
 import { type DealsData, useDeals, usePutDeal } from "@/hooks/use-deals";
@@ -30,22 +30,23 @@ function DealCard({ deal, seller, onOpen, onDragStart, menu }: { deal: Deal; sel
       <div className="flex items-start gap-1">
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
           <p className="truncate font-medium">{deal.clientName || "Sin nombre"}</p>
-          {deal.vehicleTitle && (
+          {deal.propertyTitle && (
             <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-              <Car className="size-3 shrink-0" /> {deal.vehicleTitle}
+              <Building2 className="size-3 shrink-0" /> {deal.propertyTitle}
             </p>
           )}
         </button>
         {menu}
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-        {deal.value != null && <span className="font-medium text-foreground">{money(deal.value)}</span>}
+        {deal.value != null && <span className="font-medium text-foreground">{money(deal.value)}{deal.closedAs === "renta" ? "/mes" : ""}</span>}
+        {deal.closedAs && <span className="rounded bg-muted px-1">{deal.closedAs === "renta" ? "Rentado" : "Vendido"}</span>}
         {deal.clientPhone && (
           <a href={`https://wa.me/${deal.clientPhone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" aria-label="WhatsApp" className="hover:text-emerald-600">
             <Phone className="size-3" />
           </a>
         )}
-        {locked && <Lock className="size-3" aria-label="Se cambia con Apartar / Registrar venta" />}
+        {locked && <Lock className="size-3" aria-label="Se cambia con Apartar / Cerrar operación" />}
         <span className="ml-auto truncate">
           {seller ? `${seller} · ` : ""}
           {deal.stageChangedAt ? formatDistanceToNowStrict(new Date(deal.stageChangedAt), { locale: es }) : ""}
@@ -57,7 +58,7 @@ function DealCard({ deal, seller, onOpen, onDragStart, menu }: { deal: Deal; sel
   );
 }
 
-/** Pipeline: kanban of opportunities. Dragging to Apartado or Vendido opens the matching dialog. */
+/** Pipeline: kanban of opportunities. Dragging to Apartado or Cerrado opens the matching dialog. */
 export default function PipelinePage() {
   const { data, isLoading, error } = useDeals();
   const can = useCan();
@@ -74,7 +75,7 @@ export default function PipelinePage() {
   async function moveTo(deal: Deal, stage: DealStage) {
     if (deal.stage === stage) return;
     if (stage === "apartado") return can("deals.reserve") ? setModal({ kind: "reserve", deal }) : toast.error("No tienes permiso para apartar");
-    if (stage === "vendido") return can("deals.sell") ? setModal({ kind: "sell", deal }) : toast.error("No tienes permiso para registrar ventas");
+    if (stage === "vendido") return can("deals.sell") ? setModal({ kind: "sell", deal }) : toast.error("No tienes permiso para cerrar operaciones");
     if (deal.stage === "apartado") return toast.error("Libera el apartado antes de mover esta oportunidad");
     if (stage === "perdido") return setModal({ kind: "edit", deal: { ...deal, stage: "perdido" } });
     const prev = qc.getQueryData<DealsData>(["deals"]);
@@ -89,10 +90,10 @@ export default function PipelinePage() {
   }
 
   async function release(deal: Deal) {
-    if (!confirm("¿Liberar el apartado? El auto vuelve a estar disponible.")) return;
+    if (!confirm("¿Liberar el apartado? La propiedad vuelve a estar disponible.")) return;
     try {
       const r = await api<{ deal: Deal }>(`/api/deals/${deal.id}/release`, { method: "POST" });
-      putDeal(r.deal, { vehicleChanged: true });
+      putDeal(r.deal, { propertyChanged: true });
       toast.success("Apartado liberado");
     } catch (e) {
       toast.error((e as Error).message);
@@ -117,11 +118,11 @@ export default function PipelinePage() {
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={() => setModal({ kind: "edit", deal })}>Ver / editar</DropdownMenuItem>
         {can("inventory") && <DropdownMenuItem onClick={() => setModal({ kind: "quote", deal })}>Cotizar (PDF)</DropdownMenuItem>}
-        {!GUARDED_STAGES.includes(deal.stage) && can("deals.reserve") && deal.vehicleId && (
-          <DropdownMenuItem onClick={() => setModal({ kind: "reserve", deal })}>Apartar auto</DropdownMenuItem>
+        {!GUARDED_STAGES.includes(deal.stage) && can("deals.reserve") && deal.propertyId && (
+          <DropdownMenuItem onClick={() => setModal({ kind: "reserve", deal })}>Apartar propiedad</DropdownMenuItem>
         )}
-        {deal.stage !== "vendido" && can("deals.sell") && deal.vehicleId && (
-          <DropdownMenuItem onClick={() => setModal({ kind: "sell", deal })}>Registrar venta</DropdownMenuItem>
+        {deal.stage !== "vendido" && can("deals.sell") && deal.propertyId && (
+          <DropdownMenuItem onClick={() => setModal({ kind: "sell", deal })}>Cerrar operación (venta/renta)</DropdownMenuItem>
         )}
         {deal.stage === "apartado" && can("deals.void") && <DropdownMenuItem onClick={() => release(deal)}>Liberar apartado</DropdownMenuItem>}
         {!GUARDED_STAGES.includes(deal.stage) && can("deals.edit") && (
@@ -146,8 +147,8 @@ export default function PipelinePage() {
           )}
         </h1>
         {can("deals.assignAll") && (
-          <select className="h-8 rounded-lg border bg-background px-2 text-sm" value={seller} onChange={(e) => setSeller(e.target.value)} aria-label="Filtrar por vendedor">
-            <option value="all">Todos los vendedores</option>
+          <select className="h-8 rounded-lg border bg-background px-2 text-sm" value={seller} onChange={(e) => setSeller(e.target.value)} aria-label="Filtrar por asesor">
+            <option value="all">Todos los asesores</option>
             <option value="none">Sin asignar</option>
             {data?.sellers.map((s) => (
               <option key={s.id} value={s.id}>
@@ -220,7 +221,7 @@ export default function PipelinePage() {
           open
           mode="share"
           onOpenChange={(o) => !o && setModal(null)}
-          prefill={{ vehicleIds: modal.deal.vehicleId ? [modal.deal.vehicleId] : [], clientId: modal.deal.clientId, clientName: modal.deal.clientName, dealId: modal.deal.id }}
+          prefill={{ propertyIds: modal.deal.propertyId ? [modal.deal.propertyId] : [], clientId: modal.deal.clientId, clientName: modal.deal.clientName, dealId: modal.deal.id }}
         />
       )}
     </div>

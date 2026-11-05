@@ -16,13 +16,13 @@ export function useDeals() {
 /** Writes a changed deal into the board cache; a deal sold or reserved also changes the inventory. */
 export function usePutDeal() {
   const qc = useQueryClient();
-  return (d: Deal, { vehicleChanged = false } = {}) => {
+  return (d: Deal, { propertyChanged = false } = {}) => {
     qc.setQueryData<DealsData>(["deals"], (old) =>
       old && { ...old, deals: old.deals.some((x) => x.id === d.id) ? old.deals.map((x) => (x.id === d.id ? d : x)) : [d, ...old.deals] },
     );
-    if (vehicleChanged) {
-      qc.invalidateQueries({ queryKey: ["vehicles"] });
-      qc.invalidateQueries({ queryKey: ["vehicle"] });
+    if (propertyChanged) {
+      qc.invalidateQueries({ queryKey: ["properties"] });
+      qc.invalidateQueries({ queryKey: ["property"] });
       qc.invalidateQueries({ queryKey: ["deals"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
     }

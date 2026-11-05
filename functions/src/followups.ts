@@ -1,7 +1,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
-import { conversationsCol, taskDoc, tenantsCol, userDoc, vehiclesCol } from "./paths";
+import { conversationsCol, taskDoc, tenantsCol, userDoc, propertiesCol } from "./paths";
 
 // Automatic follow-ups: DMs left without an answer and apartados about to expire.
 // Task ids are deterministic, so running twice never duplicates a reminder (and a dismissed one
@@ -41,7 +41,7 @@ async function staleLeads(uid: string, staleHours: number) {
       assigneeId: null,
       clientId: null,
       dealId: null,
-      vehicleId: null,
+      propertyId: null,
       conversationId: c.id,
       kind: "stale_lead",
     });
@@ -51,7 +51,7 @@ async function staleLeads(uid: string, staleHours: number) {
 
 async function expiringReservations(uid: string) {
   const soon = Date.now() + 24 * HOUR;
-  const snap = await db().collection(vehiclesCol(uid)).where("status", "==", "apartado").get();
+  const snap = await db().collection(propertiesCol(uid)).where("status", "==", "apartado").get();
   let n = 0;
   for (const v of snap.docs) {
     const r = v.get("reservation");
@@ -59,12 +59,12 @@ async function expiringReservations(uid: string) {
     if (!r?.dealId || !exp || exp > soon) continue;
     // Same id the web uses when the apartado is created: only fills the gap if that one is missing.
     n += await createOnce(taskDoc(uid, `reservation_${r.dealId}`), {
-      title: `Vence apartado: ${v.get("title") || "auto"}`,
+      title: `Vence apartado: ${v.get("title") || "inmueble"}`,
       dueAt: Timestamp.fromMillis(exp),
       assigneeId: null,
       clientId: null,
       dealId: r.dealId,
-      vehicleId: v.id,
+      propertyId: v.id,
       conversationId: null,
       kind: "reservation_expiry",
     });
@@ -77,7 +77,7 @@ async function expiringHolds(uid: string, timezone: string) {
   const now = Date.now();
   // Single-field range: no composite index; already-expired holds are skipped in memory.
   const snap = await db()
-    .collection(vehiclesCol(uid))
+    .collection(propertiesCol(uid))
     .where("hold.until", "<=", Timestamp.fromMillis(now + 70 * 60_000))
     .get();
   const time = new Intl.DateTimeFormat("es-MX", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -86,12 +86,12 @@ async function expiringHolds(uid: string, timezone: string) {
     const until = (v.get("hold.until") as Timestamp | undefined)?.toMillis();
     if (!until || until <= now || !["disponible", "apartado"].includes(v.get("status"))) continue;
     n += await createOnce(taskDoc(uid, `hold_${v.id}_${until}`), {
-      title: `Tu bloqueo del ${v.get("title") || "auto"} vence a las ${time.format(new Date(until))}`,
+      title: `Tu bloqueo de ${v.get("title") || "la propiedad"} vence a las ${time.format(new Date(until))}`,
       dueAt: Timestamp.fromMillis(until),
       assigneeId: (v.get("hold.byId") as string | undefined) || null,
       clientId: null,
       dealId: null,
-      vehicleId: v.id,
+      propertyId: v.id,
       conversationId: null,
       kind: "hold_expiry",
     });
@@ -99,7 +99,7 @@ async function expiringHolds(uid: string, timezone: string) {
   return n;
 }
 
-export const alFlagStaleLeads = onSchedule("every 60 minutes", async () => {
+export const kfFlagStaleLeads = onSchedule("every 60 minutes", async () => {
   const tenants = await db().collection(tenantsCol()).where("status", "==", "active").get();
   let created = 0;
   for (const t of tenants.docs) {

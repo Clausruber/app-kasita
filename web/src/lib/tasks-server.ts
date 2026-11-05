@@ -20,7 +20,7 @@ export function toTaskRow(id: string, d: FirebaseFirestore.DocumentData): Task {
     assigneeId: d.assigneeId ?? null,
     clientId: d.clientId ?? null,
     dealId: d.dealId ?? null,
-    vehicleId: d.vehicleId ?? null,
+    propertyId: d.propertyId ?? null,
     conversationId: d.conversationId ?? null,
     kind: d.kind ?? "manual",
     createdAt: iso(d.createdAt),
@@ -53,6 +53,6 @@ export function parseTaskInput(user: ApiUser, body: Record<string, unknown>, cre
     if (!actorCan(user.actor, "tasks.all") && a !== null && a !== sellerIdOf(user)) throw new HttpError(403, "Solo puedes asignarte tareas a ti mismo");
     out.assigneeId = a;
   }
-  if (creating) for (const k of ["clientId", "dealId", "vehicleId", "conversationId"]) out[k] = clip(body[k], 400) || null;
+  if (creating) for (const k of ["clientId", "dealId", "propertyId", "conversationId"]) out[k] = clip(body[k], 400) || null;
   return out;
 }

@@ -5,18 +5,20 @@ import { httpsCallable } from "firebase/functions";
 import { toast } from "sonner";
 import { Bot, Check, ChevronLeft, ChevronRight, Clock, UserRound, X } from "lucide-react";
 import { functions } from "@/lib/firebase/client";
+import { functionsErrorMessage } from "@/lib/functions-error";
 import type { Agenda, Booking } from "@/lib/types";
 import { useBookings } from "@/hooks/use-firestore";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { BookingModal } from "@/components/agenda/booking-modal";
+import { DateField } from "@/components/shared/date-field";
 import { cn } from "@/lib/utils";
 import { useCan } from "@/hooks/use-me";
+import { useAgents } from "@/hooks/use-agents";
 
 type Slot = { start: number; time: string; label: string; lanes: string[] };
-const getSlotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "alGetSlots");
-export const confirmBookingFn = httpsCallable<{ bookingId: string }>(functions, "alConfirmBooking");
-export const cancelBookingFn = httpsCallable<{ bookingId: string }>(functions, "alCancelBooking");
+const getSlotsFn = httpsCallable<{ agendaId: string; date: string }, { slots: Slot[] }>(functions, "kfGetSlots");
+export const confirmBookingFn = httpsCallable<{ bookingId: string }>(functions, "kfConfirmBooking");
+export const cancelBookingFn = httpsCallable<{ bookingId: string }>(functions, "kfCancelBooking");
 
 /** Today (YYYY-MM-DD) in a timezone. */
 export const todayIn = (tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
@@ -35,16 +37,25 @@ export const STATUS_LABEL: Record<Booking["status"], string> = {
   expired: "Caducada",
 };
 
-/** One agenda's day: free slots (click to book) and the bookings, both live. */
-export function AgendaDay({ agenda }: { agenda: Agenda }) {
+/**
+ * One agenda's day: free slots (click to book) and the bookings, both live. In an agenda with agents,
+ * free slots say who is free and `agentId` narrows the day to one agent ("Mis visitas").
+ */
+export function AgendaDay({ agenda, agentId = null }: { agenda: Agenda; agentId?: string | null }) {
   const [date, setDate] = useState(() => todayIn(agenda.timezone));
   const [slots, setSlots] = useState<Slot[] | null>(null);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
   const [booking, setBooking] = useState<Slot | null>(null);
   const canBook = useCan()("agenda.book");
+  const staffed = !!agenda.agents;
+  const names = new Map((useAgents(staffed).data?.agents ?? []).map((a) => [a.id, a.name]));
+  const nameOf = (id: string) => names.get(id) ?? "Asesor";
 
   const range = useMemo(() => [new Date(`${shift(date, -1)}T00:00:00Z`), new Date(`${shift(date, 2)}T00:00:00Z`)] as const, [date]);
   const { data: bookings } = useBookings(range[0], range[1]);
   const dayBookings = bookings.filter((b) => b.agendaId === agenda.id && b.date === date && ["held", "confirmed"].includes(b.status));
+  const shownBookings = agentId ? dayBookings.filter((b) => b.assigneeId === agentId) : dayBookings;
+  const shownSlots = (slots ?? []).filter((s) => !agentId || !staffed || s.lanes.includes(agentId));
   // Refetch free slots whenever this day's bookings change (agent or admin).
   const busyKey = dayBookings.map((b) => `${b.id}:${b.status}`).join(",");
   const agendaKey = JSON.stringify(agenda);
@@ -52,16 +63,16 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
   useEffect(() => {
     let cancelled = false;
     getSlotsFn({ agendaId: agenda.id, date })
-      .then((r) => !cancelled && setSlots(r.data.slots))
-      .catch((e) => !cancelled && (toast.error((e as Error).message), setSlots([])));
+      .then((r) => !cancelled && (setSlotsError(null), setSlots(r.data.slots)))
+      .catch((e) => !cancelled && (setSlotsError(functionsErrorMessage(e)), setSlots([])));
     return () => {
       cancelled = true;
     };
   }, [agenda.id, date, busyKey, agendaKey]);
 
   const rows = [
-    ...(slots ?? []).map((s) => ({ kind: "free" as const, time: s.time, slot: s })),
-    ...dayBookings.map((b) => ({ kind: "booking" as const, time: b.time, booking: b })),
+    ...shownSlots.map((s) => ({ kind: "free" as const, time: s.time, slot: s })),
+    ...shownBookings.map((b) => ({ kind: "booking" as const, time: b.time, booking: b })),
   ].sort((a, b) => a.time.localeCompare(b.time));
 
   async function act(fn: typeof confirmBookingFn, b: Booking, ok: string) {
@@ -79,7 +90,7 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
         <Button variant="outline" size="icon-sm" aria-label="Día anterior" onClick={() => setDate((d) => shift(d, -1))}>
           <ChevronLeft />
         </Button>
-        <Input type="date" className="w-auto" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        <DateField value={date} onChange={(v) => v && setDate(v)} />
         <Button variant="outline" size="icon-sm" aria-label="Día siguiente" onClick={() => setDate((d) => shift(d, 1))}>
           <ChevronRight />
         </Button>
@@ -91,6 +102,8 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
 
       {slots === null ? (
         <p className="text-sm text-muted-foreground">Cargando horarios…</p>
+      ) : slotsError && !rows.length ? (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{slotsError}</p>
       ) : !rows.length ? (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           No hay horarios este día (cerrado, bloqueado, fuera de plazo o ya pasado).
@@ -107,7 +120,10 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
                 >
                   <span className="w-12 font-mono">{r.time}</span>
                   <span className="text-muted-foreground">
-                    Libre{(agenda.lanes ?? 1) > 1 ? ` (${(r.slot.lanes ?? []).join(", ")})` : ""} · reservar
+                    {staffed
+                      ? `Libre · ${(agentId ? [agentId] : r.slot.lanes).map(nameOf).join(", ")}`
+                      : `Libre${(agenda.lanes ?? 1) > 1 ? ` (${(r.slot.lanes ?? []).join(", ")})` : ""}`}{" "}
+                    · reservar
                   </span>
                 </button>
               </li>
@@ -128,7 +144,10 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
                   <span className="truncate font-medium">{r.booking.customer.name}</span>
                   {r.booking.customer.platform && <span className="text-xs text-muted-foreground">· {r.booking.customer.platform}</span>}
                   {r.booking.customer.contact && <span className="truncate text-xs text-muted-foreground">· {r.booking.customer.contact}</span>}
-                  {r.booking.vehicle && <span className="truncate text-xs font-medium">· {r.booking.vehicle.title}</span>}
+                  {r.booking.property && <span className="truncate text-xs font-medium">· {r.booking.property.title}</span>}
+                  {r.booking.assigneeId && (
+                    <span className="truncate text-xs text-muted-foreground">· Atiende {r.booking.assigneeName || nameOf(r.booking.assigneeId)}</span>
+                  )}
                 </span>
                 <span className={cn("flex items-center gap-1 text-xs", r.booking.status === "held" && "text-amber-700 dark:text-amber-300")}>
                   {r.booking.status === "held" && <Clock className="size-3" />}
@@ -156,7 +175,11 @@ export function AgendaDay({ agenda }: { agenda: Agenda }) {
       )}
 
       {booking && (
-        <BookingModal open onOpenChange={(o) => !o && setBooking(null)} prefill={{ agendaId: agenda.id, date, time: booking.time }} />
+        <BookingModal
+          open
+          onOpenChange={(o) => !o && setBooking(null)}
+          prefill={{ agendaId: agenda.id, date, time: booking.time, ...(agentId && staffed ? { assigneeId: agentId } : {}) }}
+        />
       )}
     </div>
   );

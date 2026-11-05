@@ -6,7 +6,6 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CheckCircle2, FileText, Plus, Search } from "lucide-react";
 import { api } from "@/lib/api";
-import { money } from "@/lib/vehicle-catalog";
 import { useCan } from "@/hooks/use-me";
 import { QuoteBuilder, type QuoteRow } from "@/components/quotes/quote-builder";
 import { QuoteLinkActions, QuoteStatusBadge, quoteUrl } from "@/components/quotes/quote-links";
@@ -24,7 +23,7 @@ const STATUS_FILTERS: { id: "all" | QuoteRow["status"]; label: string }[] = [
 ];
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-/** Cotizaciones: build a quote link (filters, up to 5 cars, client) and follow every quote sent. */
+/** Cotizaciones: build a quote link (filters, up to 5 properties, client) and follow every quote sent. */
 export default function QuotesPage() {
   const can = useCan()("inventory");
   const [created, setCreated] = useState<QuoteRow | null>(null);
@@ -37,7 +36,7 @@ export default function QuotesPage() {
     const term = norm(q.trim());
     return (list.data?.quotes ?? [])
       .filter((r) => status === "all" || r.status === status)
-      .filter((r) => !term || norm([r.folio, r.clientName, r.clientWhatsapp, ...r.vehicles.map((v) => v.title)].join(" ")).includes(term));
+      .filter((r) => !term || norm([r.folio, r.clientName, r.clientWhatsapp, ...r.properties.map((v) => v.title)].join(" ")).includes(term));
   }, [list.data, status, q]);
   const counts = useMemo(() => {
     const all = list.data?.quotes ?? [];
@@ -65,7 +64,7 @@ export default function QuotesPage() {
                 </p>
                 <p className="rounded-lg bg-muted px-3 py-2 font-mono text-xs break-all">{quoteUrl(created)}</p>
                 <QuoteLinkActions row={created} labels />
-                <p className="text-xs text-muted-foreground">Te avisamos en Seguimientos cuando el cliente abra el link, agende una prueba de manejo o acepte un auto.</p>
+                <p className="text-xs text-muted-foreground">Te avisamos en Seguimientos cuando el cliente abra el link, agende una visita o elija una propiedad.</p>
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -120,8 +119,8 @@ export default function QuotesPage() {
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
                       {r.accepted
-                        ? `Quiere: ${r.accepted.vehicleTitle}${r.accepted.months ? ` · ${r.accepted.downPct}% a ${r.accepted.months} meses` : ""}${r.accepted.tradeIn ? ` · a cuenta: ${r.accepted.tradeIn.description || "auto"} (${money(r.accepted.tradeIn.value)})` : ""}`
-                        : r.vehicles.map((v) => v.title).join(", ")}
+                        ? `Le interesa: ${r.accepted.propertyTitle}${r.accepted.months ? ` · crédito con ${r.accepted.downPct}% a ${r.accepted.months / 12} años` : ""}`
+                        : r.properties.map((v) => v.title).join(", ")}
                     </p>
                     <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
                       {r.createdAt && <span>Creada {format(new Date(r.createdAt), "d MMM, HH:mm", { locale: es })}</span>}

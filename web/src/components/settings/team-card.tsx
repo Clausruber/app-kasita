@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import { Copy, Link2, MessageCircle, Trash2, UserPlus } from "lucide-react";
 import { api } from "@/lib/api";
 import { PERMISSIONS, ROLE_PRESETS, TEAM_ROLES, type TeamRole, normalisePerms, roleLabel } from "@/lib/permissions";
+import type { Availability } from "@/lib/types";
 import { Avatar } from "@/components/inbox/commenter-list";
+import { AvailabilityEditor } from "@/components/settings/availability-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,6 +33,7 @@ type Member = {
   inviteExpiresAt: string | null;
   createdAt: string | null;
   acceptedAt: string | null;
+  availability: Availability | null;
 };
 type Invite = { url: string; expiresAt: string };
 
@@ -239,6 +242,7 @@ function MemberDialog({ member, onClose }: { member: Member; onClose: () => void
           <TabsList>
             <TabsTrigger value="datos">Datos</TabsTrigger>
             <TabsTrigger value="accesos">Accesos</TabsTrigger>
+            <TabsTrigger value="horario">Horario</TabsTrigger>
           </TabsList>
           <TabsContent value="datos" className="space-y-4 pt-2">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -320,6 +324,14 @@ function MemberDialog({ member, onClose }: { member: Member; onClose: () => void
           </TabsContent>
           <TabsContent value="accesos" className="pt-2">
             <AccessEditor value={perms} onChange={setPerms} />
+          </TabsContent>
+          <TabsContent value="horario" className="space-y-2 pt-2">
+            <p className="text-xs text-muted-foreground">Horario en que {member.firstName || "esta persona"} puede atender visitas. Se guarda aparte del botón Guardar.</p>
+            <AvailabilityEditor
+              value={member.availability ?? { weekly: null, blockedDates: [] }}
+              saving={busy}
+              onSave={(availability) => put({ availability }, "Horario guardado")}
+            />
           </TabsContent>
         </Tabs>
 

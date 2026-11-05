@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { CalendarCheck, CheckCircle2, MessageCircle, ThumbsUp } from "lucide-react";
 import { functions } from "@/lib/firebase/client";
-import { quoteFor } from "@/lib/quote-math";
+import { quoteFor, termLabel } from "@/lib/quote-math";
 import type { PublicQuote } from "@/lib/quote-public";
-import type { QuoteVehicle } from "@/lib/quotes-server";
-import { money } from "@/lib/vehicle-catalog";
+import type { QuoteProperty } from "@/lib/quotes-server";
+import { forSale, money, priceLine } from "@/lib/property-catalog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -15,10 +15,10 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 type Slot = { time: string; label: string };
-const slotsFn = httpsCallable<{ token: string; vehicleId: string; date: string }, { slots: Slot[]; timezone: string }>(functions, "alQuoteSlots");
-const bookFn = httpsCallable<{ token: string; vehicleId: string; date: string; time: string; name: string; whatsapp: string }, { label: string; lane: string | null }>(
+const slotsFn = httpsCallable<{ token: string; propertyId: string; date: string }, { slots: Slot[]; timezone: string }>(functions, "kfQuoteSlots");
+const bookFn = httpsCallable<{ token: string; propertyId: string; date: string; time: string; name: string; whatsapp: string }, { label: string; lane: string | null }>(
   functions,
-  "alQuoteBook",
+  "kfQuoteBook",
 );
 
 const post = async <T,>(path: string, body: unknown): Promise<T> => {
@@ -38,34 +38,29 @@ export function ViewBeacon({ token }: { token: string }) {
 
 const todayMx = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City" }).format(new Date());
 
-/** Per-car block: financing simulator, WhatsApp, test drive and "Quiero este auto". */
-export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; quote: PublicQuote; vehicle: QuoteVehicle }) {
+/** Per-property block: mortgage simulator (properties for sale), WhatsApp, visit and "Me interesa". */
+export function QuotePropertyActions({ token, quote, property }: { token: string; quote: PublicQuote; property: QuoteProperty }) {
   const f = quote.financing;
-  const initialDown = f.downMode === "pct" ? f.down : vehicle.price ? Math.round((f.down / vehicle.price) * 100) : quote.minDownPct;
+  const initialDown = f.downMode === "pct" ? f.down : property.price ? Math.round((f.down / property.price) * 100) : quote.minDownPct;
   const [downPct, setDownPct] = useState(Math.max(quote.minDownPct, Math.min(90, initialDown)));
   const terms = [...f.terms].sort((a, b) => a - b);
-  const [months, setMonths] = useState(terms[Math.floor((terms.length - 1) / 2)] ?? 48);
-  const showSim = quote.allowSimulation || quote.hasFinancing;
-  // Trade-in: the seller's (if any) as a starting point; the customer can add or change it when simulating.
-  const [withTrade, setWithTrade] = useState(!!quote.tradeIn);
-  const [tradeModel, setTradeModel] = useState(quote.tradeIn?.description ?? "");
-  const [tradeValue, setTradeValue] = useState(quote.tradeIn?.value ? String(quote.tradeIn.value) : "");
-  const tradeAmount = Math.max(0, Math.round(Number(tradeValue.replace(/[^\d]/g, "")) || 0));
-  const trade = withTrade && tradeAmount > 0 ? { description: tradeModel.trim(), value: tradeAmount } : null;
+  const [months, setMonths] = useState(terms[Math.floor((terms.length - 1) / 2)] ?? 180);
+  // The credit simulator only makes sense for a property for sale.
+  const salePrice = forSale(property.operation ?? "venta") ? (property.salePrice ?? property.price) : 0;
+  const showSim = !!salePrice && (quote.allowSimulation || quote.hasFinancing);
   const qt = useMemo(
-    () => quoteFor(vehicle.price, { ...f, downMode: "pct", down: downPct, terms: [months] }, trade, quote.minDownPct),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [vehicle.price, f, downPct, months, trade?.value, quote.minDownPct],
+    () => quoteFor(salePrice, { ...f, downMode: "pct", down: downPct, terms: [months] }, quote.minDownPct),
+    [salePrice, f, downPct, months, quote.minDownPct],
   );
   const payment = qt.rows[0]?.payment ?? 0;
   const expired = quote.status === "expired";
-  const acceptedThis = quote.accepted?.vehicleId === vehicle.id;
+  const acceptedThis = quote.accepted?.propertyId === property.id;
   const [accepted, setAccepted] = useState(acceptedThis);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [driveOpen, setDriveOpen] = useState(false);
+  const [visitOpen, setVisitOpen] = useState(false);
 
-  const waText = `Hola, vi la cotización ${quote.folio}: me interesa el ${vehicle.title}${showSim && payment ? ` con ${downPct}% de enganche a ${months} meses (${money(payment)}/mes)` : ""}${trade ? `, dejando a cuenta mi ${trade.description || "auto"} (${money(trade.value)})` : ""}.`;
+  const waText = `Hola, vi la cotización ${quote.folio}: me interesa ${property.title}${showSim && payment ? ` con ${downPct}% de enganche a ${termLabel(months)} (${money(payment)}/mes)` : ""}.`;
   const waHref = quote.company.whatsapp ? `https://wa.me/${quote.company.whatsapp}?text=${encodeURIComponent(waText)}` : null;
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -74,7 +69,7 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
     setBusy(true);
     setError("");
     try {
-      await post(`/api/public/quotes/${token}/accept`, { vehicleId: vehicle.id, downPct: showSim ? downPct : null, months: showSim ? months : null, tradeIn: trade });
+      await post(`/api/public/quotes/${token}/accept`, { propertyId: property.id, downPct: showSim ? downPct : null, months: showSim ? months : null });
       setAccepted(true);
     } catch (e) {
       setError((e as Error).message);
@@ -88,7 +83,7 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
       {showSim && (
         <div className="space-y-3 rounded-xl bg-muted/60 p-3">
           <div className="flex items-baseline justify-between gap-2">
-            <p className="text-sm font-medium">{quote.allowSimulation ? "Simula tu financiamiento" : "Plan de financiamiento"}</p>
+            <p className="text-sm font-medium">{quote.allowSimulation ? "Simula tu crédito hipotecario" : "Plan de crédito hipotecario"}</p>
             <p className="text-right">
               <span className="text-xl font-bold">{money(payment)}</span>
               <span className="text-xs text-muted-foreground"> /mes</span>
@@ -98,13 +93,13 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
             <>
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <Label htmlFor={`down-${vehicle.id}`}>Enganche</Label>
+                  <Label htmlFor={`down-${property.id}`}>Enganche</Label>
                   <span className="tabular-nums">
-                    {downPct}% · {money(qt.cashDown)}
+                    {downPct}% · {money(qt.down)}
                   </span>
                 </div>
                 <input
-                  id={`down-${vehicle.id}`}
+                  id={`down-${property.id}`}
                   type="range"
                   min={quote.minDownPct}
                   max={90}
@@ -122,59 +117,20 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
                     onClick={() => setMonths(t)}
                     className={cn("rounded-full border px-3 py-1 text-xs", t === months ? "border-primary bg-primary text-primary-foreground" : "bg-background")}
                   >
-                    {t} meses
+                    {termLabel(t)}
                   </button>
                 ))}
-              </div>
-              <div className="space-y-2 rounded-lg border bg-background p-2.5">
-                <label className="flex items-center gap-2 text-xs font-medium">
-                  <input type="checkbox" className="size-4 accent-primary" checked={withTrade} onChange={(e) => setWithTrade(e.target.checked)} />
-                  Tengo un auto para dejar a cuenta
-                </label>
-                {withTrade && (
-                  <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
-                    <div className="space-y-1">
-                      <Label htmlFor={`trade-model-${vehicle.id}`} className="text-xs">
-                        Modelo
-                      </Label>
-                      <Input id={`trade-model-${vehicle.id}`} placeholder="Ej. Nissan Versa 2018, 80,000 km" maxLength={200} value={tradeModel} onChange={(e) => setTradeModel(e.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor={`trade-value-${vehicle.id}`} className="text-xs">
-                        Valor estimado (MXN)
-                      </Label>
-                      <div className="relative">
-                        <span className="pointer-events-none absolute top-1.5 left-2 text-sm text-muted-foreground">$</span>
-                        <Input
-                          id={`trade-value-${vehicle.id}`}
-                          inputMode="numeric"
-                          className="pl-5"
-                          placeholder="150,000"
-                          value={tradeAmount ? tradeAmount.toLocaleString("es-MX") : tradeValue.replace(/[^\d]/g, "")}
-                          onChange={(e) => setTradeValue(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground sm:col-span-2">El valor final se confirma al revisar tu auto.</p>
-                  </div>
-                )}
               </div>
             </>
           )}
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            {trade && (
-              <>
-                <dt className="text-muted-foreground">Auto a cuenta</dt>
-                <dd className="text-right">- {money(qt.tradeIn)}</dd>
-              </>
-            )}
             <dt className="text-muted-foreground">Enganche</dt>
-            <dd className="text-right">- {money(qt.cashDown)}</dd>
+            <dd className="text-right">- {money(qt.down)}</dd>
             <dt className="text-muted-foreground">A financiar</dt>
             <dd className="text-right font-medium">{money(qt.financed)}</dd>
             <dt className="text-muted-foreground">Plazo y tasa</dt>
             <dd className="text-right">
-              {months} meses · {f.rate}%{f.ivaOnInterest ? " + IVA" : ""}
+              {termLabel(months)} · {f.rate}% anual
             </dd>
           </dl>
           {qt.warnings.map((w) => (
@@ -182,7 +138,7 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
               {w}
             </p>
           ))}
-          <p className="text-[11px] text-muted-foreground">Cálculo informativo; el financiamiento está sujeto a aprobación de crédito.</p>
+          <p className="text-[11px] text-muted-foreground">Cálculo informativo; el crédito está sujeto a aprobación de la institución financiera.</p>
         </div>
       )}
 
@@ -192,14 +148,14 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
             <MessageCircle /> WhatsApp
           </Button>
         )}
-        {quote.testDrive && !expired && (
-          <Button variant="outline" onClick={() => setDriveOpen(true)}>
-            <CalendarCheck /> Prueba de manejo
+        {quote.visit && !expired && (
+          <Button variant="outline" onClick={() => setVisitOpen(true)}>
+            <CalendarCheck /> Agendar visita
           </Button>
         )}
         {!expired && (
           <Button disabled={busy || accepted || (!!quote.accepted && !acceptedThis)} onClick={() => (setError(""), setConfirmOpen(true))}>
-            {accepted ? <CheckCircle2 /> : <ThumbsUp />} {accepted ? "¡Listo! Te contactamos" : "Quiero este auto"}
+            {accepted ? <CheckCircle2 /> : <ThumbsUp />} {accepted ? "¡Listo! Te contactamos" : "Me interesa"}
           </Button>
         )}
       </div>
@@ -213,7 +169,7 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
                 <DialogHeader>
                   <DialogTitle className="text-center">¡Gracias! Ya le avisamos a tu asesor</DialogTitle>
                   <DialogDescription className="text-center">
-                    {quote.sellerName ? `${quote.sellerName} te contactará` : "Un asesor te contactará"} en breve para dar seguimiento a tu {vehicle.title}.
+                    {quote.sellerName ? `${quote.sellerName} te contactará` : "Un asesor te contactará"} en breve para dar seguimiento a {property.title}.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
@@ -228,42 +184,34 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
             ) : (
               <>
                 <DialogHeader>
-                  <DialogTitle>¿Te interesa este auto?</DialogTitle>
+                  <DialogTitle>¿Te interesa esta propiedad?</DialogTitle>
                   <DialogDescription>Confirma y tu asesor te contactará para dar seguimiento con estas condiciones.</DialogDescription>
                 </DialogHeader>
                 <div className="flex items-center gap-3 rounded-lg border p-2">
-                  {vehicle.photos[0] && (
+                  {property.photos[0] && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={vehicle.photos[0]} alt="" className="size-16 shrink-0 rounded object-cover" />
+                    <img src={property.photos[0]} alt="" className="size-16 shrink-0 rounded object-cover" />
                   )}
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{vehicle.title}</p>
-                    <p className="text-sm font-semibold text-primary">{money(vehicle.price)}</p>
+                    <p className="truncate font-medium">{property.title}</p>
+                    <p className="text-sm font-semibold text-primary">{priceLine(property)}</p>
                   </div>
                 </div>
                 {showSim && (
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
                     <dt className="text-muted-foreground">Enganche</dt>
                     <dd className="text-right">
-                      {downPct}% · {money(qt.cashDown)}
+                      {downPct}% · {money(qt.down)}
                     </dd>
-                    {trade && (
-                      <>
-                        <dt className="text-muted-foreground">Auto a cuenta</dt>
-                        <dd className="text-right">
-                          {trade.description || "Mi auto"} · {money(trade.value)}
-                        </dd>
-                      </>
-                    )}
                     <dt className="text-muted-foreground">A financiar</dt>
                     <dd className="text-right">{money(qt.financed)}</dd>
                     <dt className="text-muted-foreground">Plazo</dt>
-                    <dd className="text-right">{months} meses</dd>
+                    <dd className="text-right">{termLabel(months)}</dd>
                     <dt className="font-medium">Mensualidad</dt>
                     <dd className="text-right text-base font-bold">{money(payment)}</dd>
                   </dl>
                 )}
-                <p className="text-[11px] text-muted-foreground">Cálculo informativo; el financiamiento está sujeto a aprobación de crédito.</p>
+                {showSim && <p className="text-[11px] text-muted-foreground">Cálculo informativo; el crédito está sujeto a aprobación de la institución financiera.</p>}
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 <DialogFooter>
                   <Button variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>
@@ -278,16 +226,16 @@ export function QuoteVehicleActions({ token, quote, vehicle }: { token: string; 
           </DialogContent>
         </Dialog>
       )}
-      {driveOpen && quote.testDrive && (
-        <TestDriveDialog token={token} vehicle={vehicle} service={quote.testDrive.service} defaultName={quote.clientName} whatsappHint={quote.clientWhatsappHint} hasBooking={quote.hasBooking} onClose={() => setDriveOpen(false)} />
+      {visitOpen && quote.visit && (
+        <VisitDialog token={token} property={property} service={quote.visit.service} defaultName={quote.clientName} whatsappHint={quote.clientWhatsappHint} hasBooking={quote.hasBooking} onClose={() => setVisitOpen(false)} />
       )}
     </div>
   );
 }
 
-function TestDriveDialog({
+function VisitDialog({
   token,
-  vehicle,
+  property,
   service,
   defaultName,
   whatsappHint,
@@ -295,7 +243,7 @@ function TestDriveDialog({
   onClose,
 }: {
   token: string;
-  vehicle: QuoteVehicle;
+  property: QuoteProperty;
   service: string;
   defaultName: string;
   whatsappHint: string | null;
@@ -319,19 +267,19 @@ function TestDriveDialog({
   useEffect(() => {
     if (!date) return;
     let cancelled = false;
-    slotsFn({ token, vehicleId: vehicle.id, date })
+    slotsFn({ token, propertyId: property.id, date })
       .then((r) => !cancelled && setLoaded({ date, slots: r.data.slots }))
       .catch((e) => !cancelled && (setError((e as Error).message), setLoaded({ date, slots: [] })));
     return () => {
       cancelled = true;
     };
-  }, [date, token, vehicle.id]);
+  }, [date, token, property.id]);
 
   async function book() {
     setBusy(true);
     setError("");
     try {
-      const r = await bookFn({ token, vehicleId: vehicle.id, date, time, name, whatsapp: useKnownWhatsapp ? "" : whatsapp });
+      const r = await bookFn({ token, propertyId: property.id, date, time, name, whatsapp: useKnownWhatsapp ? "" : whatsapp });
       setDone(r.data.label);
     } catch (e) {
       setError((e as Error).message);
@@ -345,14 +293,14 @@ function TestDriveDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{service}</DialogTitle>
-          <DialogDescription>{vehicle.title}</DialogDescription>
+          <DialogDescription>{property.title}</DialogDescription>
         </DialogHeader>
         {done ? (
           <p className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-3 text-sm text-emerald-900 dark:text-emerald-200">
-            <CheckCircle2 className="size-5 shrink-0" /> ¡Listo! Te esperamos el <span className="capitalize">{done}</span>.
+            <CheckCircle2 className="size-5 shrink-0" /> ¡Listo! Te esperamos el <span className="capitalize">{done}</span>. Tu asesor te compartirá la dirección.
           </p>
         ) : hasBooking ? (
-          <p className="text-sm text-muted-foreground">Ya tienes una prueba de manejo agendada con esta cotización. Si necesitas cambiarla, escríbenos por WhatsApp.</p>
+          <p className="text-sm text-muted-foreground">Ya tienes una visita agendada con esta cotización. Si necesitas cambiarla, escríbenos por WhatsApp.</p>
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">

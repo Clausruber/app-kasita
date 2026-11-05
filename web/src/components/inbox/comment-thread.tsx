@@ -16,9 +16,9 @@ import { cn } from "@/lib/utils";
 
 const replyFn = httpsCallable<{ postId: string; messageId?: string; text: string; requestId: string }>(
   functions,
-  "alReplyToComment",
+  "kfReplyToComment",
 );
-const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "alHideComment");
+const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "kfHideComment");
 
 function when(m: Message) {
   return m.createdAt?.toDate().toLocaleString("es", { dateStyle: "short", timeStyle: "short" }) ?? "ahora";

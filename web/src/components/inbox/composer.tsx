@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BookOpen, CalendarCheck, Paperclip, Send, Sparkles, UserRoundPen, X } from "lucide-react";
+import { BookOpen, CalendarCheck, FileText, Paperclip, Send, Sparkles, UserRoundPen, X } from "lucide-react";
 import { uploadMedia } from "@/lib/api";
 import type { Message } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ export type SendInput = {
   attachmentType?: "image" | "file";
   booking?: "confirm" | "cancel";
   saveClient?: boolean;
+  quote?: "send" | "skip"; // comments: send the AI-proposed quote by private reply
 };
 
 const FIELD_LABEL = { firstName: "Nombre", lastName: "Apellidos", whatsapp: "WhatsApp", email: "Email" } as const;
@@ -60,6 +61,8 @@ export function Composer({
   const proposed = !latest.replied ? draft?.booking : null;
   const proposedClient = !latest.replied && draft?.client && Object.keys(draft.client.fields).length ? draft.client : null;
   const [saveClient, setSaveClient] = useState(true);
+  const proposedQuote = !latest.replied && !latest.quoteDm ? draft?.quote : null;
+  const [sendQuote, setSendQuote] = useState(true);
 
   // Prefill the composer with the agent's draft when one arrives (unless the user is already typing).
   const draftKey = draft ? `${draft.text}|${draft.at?.toMillis() ?? ""}` : "";
@@ -83,6 +86,7 @@ export function Composer({
       setUsingDraft(true);
       setConfirmBooking(true);
       setSaveClient(true);
+      setSendQuote(true);
       setNoteOpen(false);
       setNote("");
     } catch (e) {
@@ -115,7 +119,9 @@ export function Composer({
         ...(attachment ? { attachmentUrl: attachment.url, attachmentName: attachment.name, attachmentType: attachment.type } : {}),
         ...(proposed ? { booking: confirmBooking ? "confirm" : "cancel" } : {}),
         ...(proposedClient ? { saveClient } : {}),
+        ...(proposedQuote ? { quote: sendQuote ? "send" : "skip" } : {}),
       });
+      if (proposedQuote && sendQuote) toast.success(`Cotización de ${proposedQuote.title} enviada por mensaje privado`);
       if (proposedClient && saveClient) toast.success("Datos guardados en la ficha del cliente");
       if (proposed && confirmBooking) toast.success(`Cita confirmada: ${proposed.service} · ${proposed.label}`);
       setText("");
@@ -154,6 +160,16 @@ export function Composer({
           <span>
             Confirmar reserva al enviar: <strong>{proposed.service}</strong> · {proposed.label}
             {!confirmBooking && " (se liberará el horario)"}
+          </span>
+        </label>
+      )}
+      {proposedQuote && (
+        <label className="flex items-center gap-2 rounded-lg bg-violet-500/10 px-2 py-1.5 text-xs text-violet-800 dark:text-violet-300">
+          <input type="checkbox" checked={sendQuote} onChange={(e) => setSendQuote(e.target.checked)} />
+          <FileText className="size-3.5 shrink-0" />
+          <span>
+            Enviar por mensaje privado la cotización de <strong>{proposedQuote.title}</strong> (link público)
+            {!sendQuote && " · revisa que la respuesta no diga que se le envió"}
           </span>
         </label>
       )}
@@ -236,7 +252,7 @@ export function Composer({
           <Paperclip /> {uploading ? "Subiendo…" : "Anexo"}
         </Button>
         {catalog && canCatalog && (
-          <Button variant="outline" size="sm" disabled={sending} title="Armar una cotización (link) con autos del inventario" onClick={() => setCatalogOpen(true)}>
+          <Button variant="outline" size="sm" disabled={sending} title="Armar una cotización (link) con propiedades" onClick={() => setCatalogOpen(true)}>
             <BookOpen /> Catálogo
           </Button>
         )}
@@ -268,12 +284,22 @@ export function Composer({
   );
 }
 
+/** Chip on a public reply whose quote went to the commenter by private reply. */
+export function QuoteChip({ quote }: { quote: NonNullable<Message["quote"]> }) {
+  return (
+    <span className="flex items-center gap-0.5 rounded bg-violet-500/15 px-1 text-violet-700 dark:text-violet-300">
+      <FileText className="size-3" /> {quote.folio} por DM · {quote.propertyTitle}
+      {quote.uncertain ? " (sin confirmar)" : ""}
+    </span>
+  );
+}
+
 /** "📅 Cita" chip on a reply that confirmed a booking. */
 export function BookingChip({ booking }: { booking: NonNullable<Message["booking"]> }) {
   return (
     <span className="flex items-center gap-0.5 rounded bg-emerald-500/15 px-1 text-emerald-700 dark:text-emerald-300">
       <CalendarCheck className="size-3" /> Cita: {booking.service}
-      {booking.vehicle ? ` · ${booking.vehicle}` : ""} · {booking.label}
+      {booking.property ? ` · ${booking.property}` : ""} · {booking.label}
       {booking.lane ? ` · espacio ${booking.lane}` : ""}
     </span>
   );

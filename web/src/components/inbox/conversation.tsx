@@ -12,17 +12,17 @@ import { postDoc } from "@/lib/firebase/paths";
 import { useWorkspaceUid, useCan } from "@/hooks/use-me";
 import type { Message, Post } from "@/lib/types";
 import { Avatar, type Commenter } from "@/components/inbox/commenter-list";
-import { BookingChip, Composer, type SendInput } from "@/components/inbox/composer";
+import { BookingChip, Composer, QuoteChip, type SendInput } from "@/components/inbox/composer";
 import { cn } from "@/lib/utils";
 
 const replyFn = httpsCallable<{ postId: string; messageId: string; requestId: string } & SendInput>(
   functions,
-  "alReplyToComment",
+  "kfReplyToComment",
 );
-const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "alHideComment");
+const hideFn = httpsCallable<{ postId: string; messageId: string; hidden: boolean }>(functions, "kfHideComment");
 const suggestFn = httpsCallable<{ postId: string; messageId: string; note?: string }, { reply: string }>(
   functions,
-  "alSuggestReply",
+  "kfSuggestReply",
 );
 
 /** The selected user's thread (oldest first) + reply composer. The post is shown in column 1. */
@@ -104,6 +104,7 @@ export function Conversation({
                   </div>
                   <div className={cn("flex items-center gap-2 px-1 text-[11px] text-muted-foreground", mine && "justify-end")}>
                     {mine && m.booking && <BookingChip booking={m.booking} />}
+                    {mine && m.quote && <QuoteChip quote={m.quote} />}
                     {mine && m.sentBy === "ai" && (
                       <span className="flex items-center gap-0.5 rounded bg-violet-500/15 px-1 text-violet-700 dark:text-violet-300">
                         <Bot className="size-3" /> IA

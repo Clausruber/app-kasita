@@ -2,26 +2,34 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Car, Plus, Search } from "lucide-react";
-import { useVehicles } from "@/hooks/use-vehicles";
+import dynamic from "next/dynamic";
+import { Building2, LayoutGrid, Map as MapIcon, Plus, Search } from "lucide-react";
+import { useProperties } from "@/hooks/use-properties";
 import { useCan } from "@/hooks/use-me";
-import { VEHICLE_STATUS, daysOnLot, money } from "@/lib/vehicle-catalog";
-import type { Vehicle, VehicleStatus } from "@/lib/types";
+import { OPERATIONS, PROPERTY_STATUS, PROPERTY_TYPES, daysOnMarket, forRent, forSale, priceLine, specsLine } from "@/lib/property-catalog";
+import type { Operation, Property, PropertyStatus } from "@/lib/types";
 import { DemoDataMenu } from "@/components/inventory/demo-data-menu";
 import { StatusBadge } from "@/components/inventory/status-badge";
 import { HoldBadge, HoldButtons } from "@/components/inventory/hold-dialog";
-import { SellButton } from "@/components/inventory/vehicle-sale-dialog";
+import { CloseButton } from "@/components/inventory/close-deal-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-// Units older than this on the lot get a warning badge.
+// Leaflet touches `window`: load the map only in the browser.
+const PropertiesMap = dynamic(() => import("@/components/inventory/properties-map"), {
+  ssr: false,
+  loading: () => <p className="text-sm text-muted-foreground">Cargando mapa…</p>,
+});
+
+// Listings older than this on the market get a warning badge.
 const STALE_DAYS = 60;
 
+const closed = (s: PropertyStatus) => s === "vendido" || s === "rentado";
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-function VehicleCard({ v }: { v: Vehicle }) {
-  const days = daysOnLot(v.intakeDate, v.soldAt);
+function PropertyCard({ v }: { v: Property }) {
+  const days = daysOnMarket(v.intakeDate, v.closedAt);
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border hover:border-primary/40 hover:shadow-sm">
     <Link href={`/dashboard/inventory/${v.id}`} className="flex-1">
@@ -30,19 +38,19 @@ function VehicleCard({ v }: { v: Vehicle }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={v.photos[0].url} alt={v.title} className="size-full object-cover" loading="lazy" />
         ) : (
-          <Car className="absolute inset-0 m-auto size-10 text-muted-foreground/50" />
+          <Building2 className="absolute inset-0 m-auto size-10 text-muted-foreground/50" />
         )}
         <span className="absolute top-2 left-2 flex gap-1">
           <StatusBadge status={v.status} />
           {v.demo && <span className="rounded bg-violet-600/90 px-1.5 text-[11px] leading-5 text-white">Prueba</span>}
         </span>
-        {v.status !== "vendido" && (
+        {!closed(v.status) && (
           <span
             className={cn(
               "absolute top-2 right-2 rounded bg-black/60 px-1.5 text-[11px] text-white",
               days > STALE_DAYS && "bg-red-600/90",
             )}
-            title="Días en el lote"
+            title="Días en el mercado"
           >
             {days} d
           </span>
@@ -50,18 +58,18 @@ function VehicleCard({ v }: { v: Vehicle }) {
         {v.hold && <HoldBadge hold={v.hold} className="absolute bottom-2 left-2" />}
       </div>
       <div className="space-y-0.5 p-3">
-        <p className="truncate text-sm font-medium">{v.title || `${v.brand} ${v.model} ${v.year}`}</p>
-        <p className="text-lg font-semibold">{money(v.price)}</p>
+        <p className="truncate text-sm font-medium">{v.title || v.propertyType}</p>
+        <p className="text-lg font-semibold">{priceLine(v)}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {[v.year, v.km ? `${v.km.toLocaleString("es-MX")} km` : null, v.transmission, v.location.city].filter(Boolean).join(" · ")}
+          {[v.propertyType, specsLine(v), v.location.neighborhood || v.location.city].filter(Boolean).join(" · ")}
         </p>
       </div>
     </Link>
       {(v.status === "disponible" || v.status === "apartado") && (
         <div className="flex flex-wrap items-center gap-1 border-t px-2 py-1.5">
-          <HoldButtons vehicle={v} size="xs" />
+          <HoldButtons property={v} size="xs" />
           <span className="ml-auto">
-            <SellButton vehicle={v} size="xs" />
+            <CloseButton property={v} size="xs" />
           </span>
         </div>
       )}
@@ -69,52 +77,78 @@ function VehicleCard({ v }: { v: Vehicle }) {
   );
 }
 
-/** Inventario: every unit on the lot with its cover photo, status and days on the lot. */
+/** Propiedades: every listing with its cover photo, status, price and days on the market. */
 export default function InventoryPage() {
-  const { data, isLoading, error } = useVehicles();
+  const { data, isLoading, error } = useProperties();
   const canEdit = useCan()("inventory.edit");
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<VehicleStatus | "activos" | "all">("activos");
+  const [status, setStatus] = useState<PropertyStatus | "activos" | "all">("activos");
+  const [type, setType] = useState("");
+  const [operation, setOperation] = useState<Operation | "">("");
   const [maxPrice, setMaxPrice] = useState("");
-  const vehicles = useMemo(() => data?.vehicles ?? [], [data]);
+  const [view, setView] = useState<"grid" | "map">("grid");
+  const properties = useMemo(() => data?.properties ?? [], [data]);
 
   const visible = useMemo(() => {
     const term = norm(q.trim());
     const max = Number(maxPrice) || Infinity;
-    return vehicles
-      .filter((v) => (status === "all" ? true : status === "activos" ? v.status !== "vendido" : v.status === status))
-      .filter((v) => v.price <= max)
-      .filter((v) => !term || norm([v.title, v.brand, v.model, v.trim, String(v.year), v.color, v.stockNumber].join(" ")).includes(term));
-  }, [vehicles, q, status, maxPrice]);
+    return properties
+      .filter((v) => (status === "all" ? true : status === "activos" ? !closed(v.status) : v.status === status))
+      .filter((v) => !type || v.propertyType === type)
+      .filter((v) => !operation || (operation === "venta" ? forSale(v.operation) : operation === "renta" ? forRent(v.operation) : v.operation === operation))
+      .filter((v) => {
+        // The price filter matches the operation being browsed (rent filters by monthly rent).
+        const price = operation === "renta" ? v.rentPrice : forSale(v.operation) ? v.salePrice : v.rentPrice;
+        return (price ?? 0) <= max;
+      })
+      .filter(
+        (v) =>
+          !term ||
+          norm([v.title, v.propertyType, v.development, v.location.neighborhood, v.location.city, v.stockNumber, v.address].join(" ")).includes(term),
+      );
+  }, [properties, q, status, type, operation, maxPrice]);
 
   const counts = useMemo(
-    () => Object.fromEntries(VEHICLE_STATUS.map((s) => [s.id, vehicles.filter((v) => v.status === s.id).length])) as Record<VehicleStatus, number>,
-    [vehicles],
+    () => Object.fromEntries(PROPERTY_STATUS.map((s) => [s.id, properties.filter((v) => v.status === s.id).length])) as Record<PropertyStatus, number>,
+    [properties],
   );
-  const stock = vehicles.filter((v) => v.status === "disponible" || v.status === "apartado");
-  const avgDays = stock.length ? Math.round(stock.reduce((n, v) => n + daysOnLot(v.intakeDate), 0) / stock.length) : 0;
+  const stock = properties.filter((v) => v.status === "disponible" || v.status === "apartado");
+  const avgDays = stock.length ? Math.round(stock.reduce((n, v) => n + daysOnMarket(v.intakeDate), 0) / stock.length) : 0;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-auto text-2xl font-semibold">
-          Inventario {vehicles.length > 0 && <span className="text-base font-normal text-muted-foreground">· {vehicles.length}</span>}
+          Propiedades {properties.length > 0 && <span className="text-base font-normal text-muted-foreground">· {properties.length}</span>}
         </h1>
-        <DemoDataMenu demoCount={vehicles.filter((v) => v.demo).length} />
+        <div className="flex rounded-lg border p-0.5">
+          {(
+            [
+              ["grid", LayoutGrid, "Lista"],
+              ["map", MapIcon, "Mapa"],
+            ] as const
+          ).map(([id, Icon, label]) => (
+            <Button key={id} size="sm" variant={view === id ? "secondary" : "ghost"} aria-pressed={view === id} onClick={() => setView(id)}>
+              <Icon /> {label}
+            </Button>
+          ))}
+        </div>
+        <DemoDataMenu demoCount={properties.filter((v) => v.demo).length} />
         {canEdit && (
           <Button nativeButton={false} render={<Link href="/dashboard/inventory/new" />}>
-            <Plus /> Nuevo auto
+            <Plus /> Nueva propiedad
           </Button>
         )}
       </div>
 
-      {vehicles.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {properties.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {[
             ["Disponibles", counts.disponible],
             ["Apartados", counts.apartado],
             ["Vendidos", counts.vendido],
-            ["Días promedio en lote", avgDays],
+            ["Rentados", counts.rentado],
+            ["Días promedio en el mercado", avgDays],
           ].map(([label, n]) => (
             <div key={label} className="rounded-xl border p-3">
               <p className="text-xs text-muted-foreground">{label}</p>
@@ -127,7 +161,7 @@ export default function InventoryPage() {
       <div className="flex flex-wrap gap-2">
         <div className="relative min-w-48 flex-1">
           <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Buscar marca, modelo, año, color, stock…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input className="pl-8" placeholder="Buscar colonia, ciudad, desarrollo, clave…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <select
           className="h-8 rounded-lg border bg-background px-2 text-sm"
@@ -135,19 +169,43 @@ export default function InventoryPage() {
           onChange={(e) => setStatus(e.target.value as typeof status)}
           aria-label="Filtrar por estado"
         >
-          <option value="activos">En lote (sin vendidos)</option>
-          {VEHICLE_STATUS.map((s) => (
+          <option value="activos">En el mercado (sin cerrados)</option>
+          {PROPERTY_STATUS.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label} ({counts[s.id] ?? 0})
             </option>
           ))}
           <option value="all">Todos</option>
         </select>
+        <select
+          className="h-8 rounded-lg border bg-background px-2 text-sm"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          aria-label="Filtrar por tipo"
+        >
+          <option value="">Todos los tipos</option>
+          {PROPERTY_TYPES.map((t) => (
+            <option key={t}>{t}</option>
+          ))}
+        </select>
+        <select
+          className="h-8 rounded-lg border bg-background px-2 text-sm"
+          value={operation}
+          onChange={(e) => setOperation(e.target.value as typeof operation)}
+          aria-label="Filtrar por operación"
+        >
+          <option value="">Venta y renta</option>
+          {OPERATIONS.filter((o) => o.id !== "venta_renta").map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <Input
           className="w-40"
           type="number"
           inputMode="numeric"
-          placeholder="Precio máximo"
+          placeholder={operation === "renta" ? "Renta máxima" : "Precio máximo"}
           value={maxPrice}
           onChange={(e) => setMaxPrice(e.target.value)}
           aria-label="Precio máximo"
@@ -159,13 +217,15 @@ export default function InventoryPage() {
         <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : !visible.length ? (
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          <Car className="mx-auto mb-2 size-8" />
-          {vehicles.length ? "Ningún auto coincide con los filtros." : "Aún no hay autos. Da de alta el primero con «Nuevo auto»."}
+          <Building2 className="mx-auto mb-2 size-8" />
+          {properties.length ? "Ninguna propiedad coincide con los filtros." : "Aún no hay propiedades. Da de alta la primera con «Nueva propiedad»."}
         </div>
+      ) : view === "map" ? (
+        <PropertiesMap properties={visible} />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visible.map((v) => (
-            <VehicleCard key={v.id} v={v} />
+            <PropertyCard key={v.id} v={v} />
           ))}
         </div>
       )}

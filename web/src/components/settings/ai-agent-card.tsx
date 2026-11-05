@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bot, Info } from "lucide-react";
+import { Bot, FileText, Info } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { AiSettings } from "@/lib/types";
@@ -48,7 +48,13 @@ export function AiAgentCard() {
     try {
       const saved = await api<AiSettings>("/api/settings/ai", {
         method: "PUT",
-        body: { mode: form.mode, instructions: form.instructions, brand: form.brand },
+        body: {
+          mode: form.mode,
+          instructions: form.instructions,
+          brand: form.brand,
+          quoteKeywords: form.quoteKeywords,
+          quoteKeywordsOnly: form.quoteKeywordsOnly,
+        },
       });
       qc.setQueryData(["ai-settings", user?.uid], saved);
       setDraft(null);
@@ -130,6 +136,40 @@ export function AiAgentCard() {
             value={form.instructions}
             onChange={(e) => set("instructions", e.target.value)}
           />
+        </section>
+
+        {/* Quotes requested in comments */}
+        <section className="space-y-2">
+          <Label htmlFor="quote-keywords" className="flex items-center gap-1.5">
+            <FileText className="size-4" /> Cotizaciones por comentario
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            En Instagram y Facebook, cuando un comentario pide precio o contiene una de estas palabras, el agente envía la
+            cotización del inmueble por mensaje privado y responde en el comentario que ya se la mandó. No distingue
+            mayúsculas ni acentos: «cotiza» también detecta «Cotización» o «cotizar».
+          </p>
+          <Input
+            id="quote-keywords"
+            placeholder="cotiza, precio, info"
+            value={(form.quoteKeywords ?? []).join(",")}
+            onChange={(e) => set("quoteKeywords", e.target.value.split(","))}
+          />
+          <p className="text-xs text-muted-foreground">Separa las palabras con comas.</p>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={form.quoteKeywordsOnly}
+              onChange={(e) => set("quoteKeywordsOnly", e.target.checked)}
+            />
+            <span>
+              Solo con palabra clave
+              <span className="block text-xs text-muted-foreground">
+                Envía cotizaciones únicamente si el comentario contiene una de estas palabras. Si está desactivado, la IA
+                también las envía cuando detecta que piden precio con otras palabras.
+              </span>
+            </span>
+          </label>
         </section>
 
         {/* Brand */}

@@ -6,12 +6,13 @@ import { format, addDays } from "date-fns";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { DEAL_STAGES, GUARDED_STAGES, PAYMENT_METHODS, money } from "@/lib/vehicle-catalog";
-import type { Client, Deal, DealStage } from "@/lib/types";
+import { DEAL_STAGES, GUARDED_STAGES, priceLine } from "@/lib/property-catalog";
+import type { Client, Deal, DealStage, Property } from "@/lib/types";
 import { useCan } from "@/hooks/use-me";
 import { useDeals, usePutDeal } from "@/hooks/use-deals";
-import { useVehicles } from "@/hooks/use-vehicles";
+import { useProperties } from "@/hooks/use-properties";
 import { HoldWarning } from "@/components/inventory/hold-dialog";
+import { CloseTermsFields, useCloseTerms } from "@/components/inventory/close-deal-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -31,7 +32,7 @@ type DealForm = {
   clientId: string;
   clientName: string;
   clientPhone: string;
-  vehicleId: string;
+  propertyId: string;
   stage: DealStage;
   assigneeId: string;
   value: string;
@@ -40,7 +41,7 @@ type DealForm = {
 };
 
 /**
- * Create or edit an opportunity. `prefill` links it to a client or vehicle when opened from their pages.
+ * Create or edit an opportunity. `prefill` links it to a client or property when opened from their pages.
  * `trigger` is the button that opens it; without one the dialog is controlled by `open`.
  */
 export function DealDialog({
@@ -51,7 +52,7 @@ export function DealDialog({
   onOpenChange,
 }: {
   deal?: Deal;
-  prefill?: { clientId?: string; vehicleId?: string };
+  prefill?: { clientId?: string; propertyId?: string };
   trigger?: ReactElement;
   open?: boolean;
   onOpenChange?: (o: boolean) => void;
@@ -60,7 +61,7 @@ export function DealDialog({
   const putDeal = usePutDeal();
   const board = useDeals();
   const clients = useClientsIfAllowed();
-  const vehicles = useVehicles();
+  const properties = useProperties();
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
   const setOpen = onOpenChange ?? setOpenState;
@@ -69,7 +70,7 @@ export function DealDialog({
     clientId: deal?.clientId ?? prefill?.clientId ?? "",
     clientName: deal?.clientName ?? "",
     clientPhone: deal?.clientPhone ?? "",
-    vehicleId: deal?.vehicleId ?? prefill?.vehicleId ?? "",
+    propertyId: deal?.propertyId ?? prefill?.propertyId ?? "",
     stage: deal?.stage ?? "nuevo",
     assigneeId: deal?.assigneeId ?? board.data?.me ?? "",
     value: deal?.value != null ? String(deal.value) : "",
@@ -79,14 +80,14 @@ export function DealDialog({
   const [form, setForm] = useState<DealForm>(blank);
   const set = <K extends keyof DealForm>(k: K, v: DealForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const locked = !!deal && GUARDED_STAGES.includes(deal.stage);
-  const forSale = (vehicles.data?.vehicles ?? []).filter((v) => v.status !== "vendido" || v.id === form.vehicleId);
+  const offered = (properties.data?.properties ?? []).filter((v) => !["vendido", "rentado"].includes(v.status) || v.id === form.propertyId);
 
   async function save() {
     setSaving(true);
     try {
       const body = {
         ...(form.clientId ? { clientId: form.clientId } : { clientId: "", clientName: form.clientName, clientPhone: form.clientPhone }),
-        vehicleId: form.vehicleId,
+        propertyId: form.propertyId,
         ...(locked ? {} : { stage: form.stage }),
         ...(can("deals.assignAll") ? { assigneeId: form.assigneeId || null } : {}),
         value: form.value,
@@ -118,7 +119,7 @@ export function DealDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{deal ? "Oportunidad" : "Nueva oportunidad"}</DialogTitle>
-          <DialogDescription>Un cliente interesado en un auto, de la primera conversación hasta la venta.</DialogDescription>
+          <DialogDescription>Un cliente interesado en una propiedad, de la primera conversación hasta el cierre.</DialogDescription>
         </DialogHeader>
         <fieldset disabled={!can("deals.edit")} className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">
@@ -142,12 +143,12 @@ export function DealDialog({
             )}
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="d-vehicle">Auto de interés</Label>
-            <select id="d-vehicle" className={selectCls} value={form.vehicleId} disabled={locked} onChange={(e) => set("vehicleId", e.target.value)}>
-              <option value="">— Sin auto todavía —</option>
-              {forSale.map((v) => (
+            <Label htmlFor="d-property">Propiedad de interés</Label>
+            <select id="d-property" className={selectCls} value={form.propertyId} disabled={locked} onChange={(e) => set("propertyId", e.target.value)}>
+              <option value="">— Sin propiedad todavía —</option>
+              {offered.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.title} · {money(v.price)} {v.status !== "disponible" ? `(${v.status})` : ""}
+                  {v.title} · {priceLine(v)} {v.status !== "disponible" ? `(${v.status})` : ""}
                 </option>
               ))}
             </select>
@@ -168,7 +169,7 @@ export function DealDialog({
           </div>
           {can("deals.assignAll") && (
             <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor="d-seller">Vendedor</Label>
+              <Label htmlFor="d-seller">Asesor</Label>
               <select id="d-seller" className={selectCls} value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
                 <option value="">Sin asignar</option>
                 {board.data?.sellers.map((s) => (
@@ -182,7 +183,7 @@ export function DealDialog({
           {form.stage === "perdido" && (
             <div className="space-y-1 sm:col-span-2">
               <Label htmlFor="d-lost">Motivo de pérdida</Label>
-              <Input id="d-lost" placeholder="Precio, compró en otro lado, no calificó a crédito…" value={form.lostReason} onChange={(e) => set("lostReason", e.target.value)} />
+              <Input id="d-lost" placeholder="Precio, eligió otra propiedad, no calificó a crédito…" value={form.lostReason} onChange={(e) => set("lostReason", e.target.value)} />
             </div>
           )}
           <div className="space-y-1 sm:col-span-2">
@@ -202,10 +203,10 @@ export function DealDialog({
   );
 }
 
-/** Apartado: down payment and expiry; the vehicle stops being offered while it lasts. */
-/** "Bloqueado por Laura…" when the deal's car is held by someone else (inventory cache; blocks nothing). */
-function VehicleHoldWarning({ vehicleId }: { vehicleId: string | null }) {
-  const hold = useVehicles(!!vehicleId).data?.vehicles.find((v) => v.id === vehicleId)?.hold;
+/** Apartado: down payment and expiry; the property stops being offered while it lasts. */
+/** "Bloqueado por Laura…" when the deal's property is held by someone else (inventory cache; blocks nothing). */
+function PropertyHoldWarning({ propertyId }: { propertyId: string | null }) {
+  const hold = useProperties(!!propertyId).data?.properties.find((v) => v.id === propertyId)?.hold;
   return <HoldWarning hold={hold} />;
 }
 
@@ -222,8 +223,8 @@ export function ReserveDialog({ deal, open, onOpenChange }: { deal: Deal; open: 
         method: "POST",
         body: { amount: Number(amount) || 0, expiresAt: new Date(`${expires}T23:59:00`).toISOString() },
       });
-      putDeal(r.deal, { vehicleChanged: true });
-      toast.success("Auto apartado");
+      putDeal(r.deal, { propertyChanged: true });
+      toast.success("Propiedad apartada");
       onOpenChange(false);
     } catch (e) {
       toast.error((e as Error).message);
@@ -236,10 +237,10 @@ export function ReserveDialog({ deal, open, onOpenChange }: { deal: Deal; open: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Apartar {deal.vehicleTitle ?? "auto"}</DialogTitle>
-          <DialogDescription>Para {deal.clientName}. El auto deja de ofrecerse (y el agente IA ya no lo muestra) hasta que se venda o se libere.</DialogDescription>
+          <DialogTitle>Apartar {deal.propertyTitle ?? "propiedad"}</DialogTitle>
+          <DialogDescription>Para {deal.clientName}. La propiedad deja de ofrecerse (y el agente IA ya no la muestra) hasta que se cierre o se libere.</DialogDescription>
         </DialogHeader>
-        <VehicleHoldWarning vehicleId={deal.vehicleId} />
+        <PropertyHoldWarning propertyId={deal.propertyId} />
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             <Label htmlFor="r-amount">Anticipo (MXN)</Label>
@@ -251,7 +252,7 @@ export function ReserveDialog({ deal, open, onOpenChange }: { deal: Deal; open: 
           </div>
         </div>
         <DialogFooter>
-          <Button disabled={busy || !deal.vehicleId} onClick={submit}>
+          <Button disabled={busy || !deal.propertyId} onClick={submit}>
             {busy ? "Apartando…" : "Confirmar apartado"}
           </Button>
         </DialogFooter>
@@ -260,28 +261,45 @@ export function ReserveDialog({ deal, open, onOpenChange }: { deal: Deal; open: 
   );
 }
 
-/** Venta: final price, salesperson and payment method; marks the vehicle sold. */
+/** Cierre: sale or rental terms; marks the property vendido or rentado. */
 export function SaleDialog({ deal, open, onOpenChange }: { deal: Deal; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const properties = useProperties(!!deal.propertyId);
+  const property = properties.data?.properties.find((v) => v.id === deal.propertyId) ?? null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Cerrar operación</DialogTitle>
+          <DialogDescription>
+            {deal.propertyTitle ?? "Propiedad"} con {deal.clientName}. Las demás oportunidades de esta propiedad se cierran como perdidas.
+          </DialogDescription>
+        </DialogHeader>
+        <PropertyHoldWarning propertyId={deal.propertyId} />
+        {!deal.propertyId ? (
+          <p className="text-sm text-muted-foreground">Asigna una propiedad a la oportunidad antes de cerrarla.</p>
+        ) : property ? (
+          <SaleForm deal={deal} property={property} onDone={() => onOpenChange(false)} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Cargando…</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SaleForm({ deal, property, onDone }: { deal: Deal; property: Property; onDone: () => void }) {
   const putDeal = usePutDeal();
   const board = useDeals();
-  const [price, setPrice] = useState(() => (deal.value ? String(deal.value) : ""));
-  const [seller, setSeller] = useState(() => deal.assigneeId ?? board.data?.me ?? "");
-  const [payment, setPayment] = useState<string>("contado");
-  const [financier, setFinancier] = useState("");
-  const [down, setDown] = useState("");
-  const [soldAt, setSoldAt] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const t = useCloseTerms(property, deal.assigneeId ?? board.data?.me ?? "");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     setBusy(true);
     try {
-      const r = await api<{ deal: Deal }>(`/api/deals/${deal.id}/sell`, {
-        method: "POST",
-        body: { finalPrice: Number(price), sellerId: seller, paymentMethod: payment, financier, downPayment: down, soldAt: new Date(`${soldAt}T12:00:00`).toISOString() },
-      });
-      putDeal(r.deal, { vehicleChanged: true });
-      toast.success("¡Venta registrada!");
-      onOpenChange(false);
+      const r = await api<{ deal: Deal }>(`/api/deals/${deal.id}/close`, { method: "POST", body: t.body });
+      putDeal(r.deal, { propertyChanged: true });
+      toast.success(t.kind === "venta" ? "¡Venta registrada!" : "¡Renta registrada!");
+      onDone();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -290,67 +308,19 @@ export function SaleDialog({ deal, open, onOpenChange }: { deal: Deal; open: boo
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Registrar venta</DialogTitle>
-          <DialogDescription>
-            {deal.vehicleTitle ?? "Auto"} a {deal.clientName}. Las demás oportunidades de este auto se cierran como perdidas.
-          </DialogDescription>
-        </DialogHeader>
-        <VehicleHoldWarning vehicleId={deal.vehicleId} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label htmlFor="s-price">Precio final (MXN)</Label>
-            <Input id="s-price" type="number" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="s-date">Fecha de venta</Label>
-            <Input id="s-date" type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="s-pay">Forma de pago</Label>
-            <select id="s-pay" className={selectCls} value={payment} onChange={(e) => setPayment(e.target.value)}>
-              {PAYMENT_METHODS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="s-down">Enganche (opcional)</Label>
-            <Input id="s-down" type="number" inputMode="numeric" value={down} onChange={(e) => setDown(e.target.value)} />
-          </div>
-          {payment === "financiera" && (
-            <div className="space-y-1 sm:col-span-2">
-              <Label htmlFor="s-fin">Financiera / banco</Label>
-              <Input id="s-fin" value={financier} onChange={(e) => setFinancier(e.target.value)} />
-            </div>
-          )}
-          <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="s-seller">Vendedor</Label>
-            <select id="s-seller" className={selectCls} value={seller} onChange={(e) => setSeller(e.target.value)}>
-              {board.data?.sellers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button disabled={busy || !Number(price) || !deal.vehicleId} onClick={submit}>
-            {busy ? "Registrando…" : `Registrar venta${Number(price) ? ` por ${money(Number(price))}` : ""}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <CloseTermsFields t={t} property={property} sellers={board.data?.sellers ?? []} />
+      <DialogFooter>
+        <Button disabled={busy || !t.amount} onClick={submit}>
+          {busy ? "Registrando…" : t.label}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
-/** Small helper for pages that only need "create a deal for this client / vehicle". */
-export function NewDealButton({ prefill, label = "Crear oportunidad" }: { prefill: { clientId?: string; vehicleId?: string }; label?: string }) {
+/** Small helper for pages that only need "create a deal for this client / property". */
+export function NewDealButton({ prefill, label = "Crear oportunidad" }: { prefill: { clientId?: string; propertyId?: string }; label?: string }) {
   const can = useCan();
   if (!can("deals") || !can("deals.edit")) return null;
   return <DealDialog prefill={prefill} trigger={<Button variant="outline" size="sm">{label}</Button>} />;

@@ -11,7 +11,6 @@ const MAX_BYTES = 15 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 const JPEG_QUALITY = 88;
 // Images are only downloaded from where the app itself stores them (no arbitrary URLs: SSRF).
-const STORAGE_EMULATOR = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
 const ALLOWED_HOSTS = ["media.zernio.com", "firebasestorage.googleapis.com", "storage.googleapis.com"];
 
 export type PostImagesResponse = PostImageSettings & { logoSource: "own" | "company" | "none"; companyLogoUrl: string };
@@ -19,7 +18,6 @@ export type PostImagesResponse = PostImageSettings & { logoSource: "own" | "comp
 export function isAllowedMediaUrl(raw: string) {
   try {
     const u = new URL(raw);
-    if (STORAGE_EMULATOR && u.host === STORAGE_EMULATOR) return true;
     return u.protocol === "https:" && (ALLOWED_HOSTS.includes(u.host) || u.host.endsWith(".zernio.com"));
   } catch {
     return false;

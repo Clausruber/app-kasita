@@ -16,9 +16,12 @@ const robotoMono = Roboto_Mono({
   display: "swap",
 });
 
-const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "Autolix";
-const TITLE = `${APP_NAME} — La central de mando para lotes y agencias de autos`;
-const DESCRIPTION = "Gestiona tus lotes y agencias de autos y conecta tus redes sociales y WhatsApp en un solo lugar.";
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || "Kasita";
+const TITLE = `${APP_NAME} — El copiloto 24/7 para tu inmobiliaria`;
+// First sentence = what link previews (WhatsApp, Facebook…) show under the title.
+const DESCRIPTION =
+  "Publica tus propiedades en todas las redes sociales con un clic y atiende a tus clientes en un solo lugar, 24/7, sin perder ventas. " +
+  "Un agente de IA responde al instante, agenda visitas y da seguimiento a cada cliente.";
 
 export const metadata: Metadata = {
   title: TITLE,

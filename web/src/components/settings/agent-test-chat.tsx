@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { CalendarCheck, FlaskConical, RotateCcw, SendHorizontal, UserRoundCheck, UserRoundX, Wrench } from "lucide-react";
+import { CalendarCheck, FileText, FlaskConical, RotateCcw, SendHorizontal, UserRoundCheck, UserRoundX, Wrench } from "lucide-react";
 import { functions } from "@/lib/firebase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,31 +15,33 @@ type TestResult = {
   needsHuman: boolean;
   reason: string | null;
   model: string;
-  booking: { label: string; service: string; vehicle?: string | null; lane?: string | null } | null;
+  booking: { label: string; service: string; property?: string | null; lane?: string | null } | null;
   client: { fields: Record<string, string> } | null;
+  quote?: { propertyId: string; title: string } | null;
   trace?: Trace[];
 };
 type TestInput = { channel: "dm" | "comment"; postText?: string; messages: { from: "cliente" | "marca"; text: string }[] };
 type Turn = { from: "cliente" } | { from: "marca"; result: TestResult } | { from: "error" };
 type ChatTurn = Turn & { text: string };
 
-const testFn = httpsCallable<TestInput, TestResult>(functions, "alTestAgent");
+const testFn = httpsCallable<TestInput, TestResult>(functions, "kfTestAgent");
 
 const TOOL_LABEL: Record<string, string> = {
-  search_inventory: "Buscar en inventario",
+  search_inventory: "Buscar propiedades",
   check_availability: "Ver disponibilidad",
   book_appointment: "Agendar cita",
   cancel_appointment: "Cancelar cita",
   update_client: "Guardar datos del cliente",
+  send_quote_by_dm: "Enviar cotización por DM",
 };
 const CLIENT_FIELD: Record<string, string> = { firstName: "nombre", lastName: "apellidos", whatsapp: "WhatsApp", email: "email" };
 
-/** One-line summary of what a tool returned, e.g. how many cars matched. */
+/** One-line summary of what a tool returned, e.g. how many properties matched. */
 function summary(t: Trace) {
   const r = t.result as Record<string, unknown> | null;
   if (!r || typeof r !== "object") return "";
   if (typeof r.error === "string") return `error: ${r.error}`;
-  if (Array.isArray(r.results)) return `${r.total ?? r.results.length} auto(s) encontrados`;
+  if (Array.isArray(r.results)) return `${r.total ?? r.results.length} propiedad(es) encontradas`;
   if (Array.isArray(r.free)) return r.free.length ? `${r.free.length} horario(s) libre(s)` : "sin horarios";
   if (typeof r.when === "string") return `simulada: ${r.when}`;
   if (r.ok) return "ok";
@@ -59,8 +61,13 @@ function AgentExtras({ result }: { result: TestResult }) {
         {result.booking && (
           <span className="flex items-center gap-1 rounded-md bg-emerald-100 px-1.5 py-0.5 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
             <CalendarCheck className="size-3" /> Cita simulada: {result.booking.service}
-            {result.booking.vehicle ? ` · ${result.booking.vehicle}` : ""} · {result.booking.label}
+            {result.booking.property ? ` · ${result.booking.property}` : ""} · {result.booking.label}
             {result.booking.lane ? ` · espacio ${result.booking.lane}` : ""}
+          </span>
+        )}
+        {result.quote && (
+          <span className="flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 text-violet-900 dark:bg-violet-950 dark:text-violet-200">
+            <FileText className="size-3" /> Cotización por mensaje privado (simulada): {result.quote.title}
           </span>
         )}
         {fields.length > 0 && (
@@ -134,7 +141,7 @@ export function AgentTestChat() {
           <FlaskConical className="size-5" /> Probar el agente
         </CardTitle>
         <CardDescription>
-          Escríbele como si fueras un cliente. Usa los ajustes guardados, el manual, el inventario y las agendas; nada se
+          Escríbele como si fueras un cliente. Usa los ajustes guardados, el manual, las propiedades y las agendas; nada se
           publica, no se apartan horarios y no se guardan clientes.
         </CardDescription>
       </CardHeader>

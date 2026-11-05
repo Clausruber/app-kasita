@@ -1,18 +1,18 @@
-    // ===== Autolix (app-autolix-prod): fotos de autos =====
+    // ===== Kasita (kafona-data): fotos de propiedades =====
     // Lee y sube el dueño de la cuenta o un miembro activo de su equipo; solo imágenes de menos de 10 MB.
     // Los borrados los hace la API con el SDK de admin.
-    match /app-autolix-prod/{uid}/vehicles/{vehicleId}/{file} {
-      function alOwner() {
+    match /kafona-data/{uid}/vehicles/{vehicleId}/{file} {
+      function kfOwner() {
         return request.auth != null && (
           request.auth.uid == uid ||
-          (firestore.exists(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)) &&
-           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.ownerUid == uid &&
-           firestore.get(/databases/(default)/documents/app-autolix-prod/_system/members/$(request.auth.uid)).data.status == 'active'));
+          (firestore.exists(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)) &&
+           firestore.get(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)).data.ownerUid == uid &&
+           firestore.get(/databases/(default)/documents/kafona-data/_system/members/$(request.auth.uid)).data.status == 'active'));
       }
-      allow read: if alOwner();
-      allow create: if alOwner()
+      allow read: if kfOwner();
+      allow create: if kfOwner()
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/(jpeg|png|webp)');
       allow update, delete: if false;
     }
-    // ===== fin Autolix =====
+    // ===== fin Kasita =====
