@@ -35,8 +35,9 @@ const DEV_LOGIN =
   process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEV_LOGIN_EMAIL && process.env.NEXT_PUBLIC_DEV_LOGIN_PASSWORD
     ? { email: process.env.NEXT_PUBLIC_DEV_LOGIN_EMAIL, password: process.env.NEXT_PUBLIC_DEV_LOGIN_PASSWORD }
     : null;
-// Email suggested on the login tab (editable), e.g. the demo account. Set in .env.production.
-const LOGIN_EMAIL = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? "";
+// Email and password suggested on the login tab (editable), e.g. the demo/test account.
+const LOGIN_EMAIL = process.env.NEXT_PUBLIC_LOGIN_EMAIL ?? "klausruber@gmail.com";
+const LOGIN_PASSWORD = process.env.NEXT_PUBLIC_LOGIN_PASSWORD ?? "12345678";
 
 /** Login and company sign-up in one card, with "Iniciar sesión" / "Crear cuenta" tabs. */
 export function AuthForm({ mode: initialMode }: { mode: Mode }) {
@@ -49,8 +50,8 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
     whatsapp: "",
     company: "",
     confirm: "",
-    email: initialMode === "login" ? LOGIN_EMAIL : "",
-    password: "",
+    email: initialMode === "login" ? (DEV_LOGIN?.email ?? LOGIN_EMAIL) : "",
+    password: initialMode === "login" ? (DEV_LOGIN?.password ?? LOGIN_PASSWORD) : "",
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,6 +65,13 @@ export function AuthForm({ mode: initialMode }: { mode: Mode }) {
   function switchMode(m: Mode) {
     setMode(m);
     setError(null);
+    if (m === "login") {
+      setForm((f) => ({
+        ...f,
+        email: f.email || DEV_LOGIN?.email || LOGIN_EMAIL,
+        password: f.password || DEV_LOGIN?.password || LOGIN_PASSWORD,
+      }));
+    }
     // Keep the URL in sync without a navigation (/login ↔ /register).
     window.history.replaceState(null, "", m === "login" ? "/login" : "/register");
   }
