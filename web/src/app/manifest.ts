@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+export const dynamic = "force-static";
+
 // Installable app (Add to Home Screen) with the Kasita icon.
 export default function manifest(): MetadataRoute.Manifest {
   const name = process.env.NEXT_PUBLIC_APP_NAME || "Kasita";

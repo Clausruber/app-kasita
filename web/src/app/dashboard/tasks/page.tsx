@@ -67,7 +67,7 @@ function TaskRow({ task, now, seller, onEdit, onToggle, onDelete }: { task: Task
             </Link>
           )}
           {task.propertyId && (
-            <Link href={`/dashboard/inventory/${task.propertyId}`} className="flex items-center gap-1 hover:text-foreground">
+            <Link href={`/dashboard/inventory/detail?id=${task.propertyId}`} className="flex items-center gap-1 hover:text-foreground">
               <Building2 className="size-3" /> Propiedad
             </Link>
           )}

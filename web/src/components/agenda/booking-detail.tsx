@@ -84,7 +84,7 @@ export function BookingDetail({ booking, onClose }: { booking: Booking; onClose:
           {booking.property && (
             <p className="flex items-center gap-2">
               <Building2 className="size-4" />
-              <Link href={`/dashboard/inventory/${booking.property.id}`} className="font-medium hover:underline">
+              <Link href={`/dashboard/inventory/detail?id=${booking.property.id}`} className="font-medium hover:underline">
                 {booking.property.title}
               </Link>
             </p>

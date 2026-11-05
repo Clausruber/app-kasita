@@ -32,7 +32,7 @@ function PropertyCard({ v }: { v: Property }) {
   const days = daysOnMarket(v.intakeDate, v.closedAt);
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border hover:border-primary/40 hover:shadow-sm">
-    <Link href={`/dashboard/inventory/${v.id}`} className="flex-1">
+    <Link href={`/dashboard/inventory/detail?id=${v.id}`} className="flex-1">
       <div className="relative aspect-[4/3] bg-muted">
         {v.photos[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -136,7 +136,7 @@ export default function InventoryPage() {
         </div>
         <DemoDataMenu demoCount={properties.filter((v) => v.demo).length} />
         {canEdit && (
-          <Button nativeButton={false} render={<Link href="/dashboard/inventory/new" />}>
+          <Button nativeButton={false} render={<Link href="/dashboard/inventory/detail?id=new" />}>
             <Plus /> Nueva propiedad
           </Button>
         )}

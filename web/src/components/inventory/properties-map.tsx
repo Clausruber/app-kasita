@@ -95,7 +95,7 @@ export default function PropertiesMap({ properties }: { properties: Property[] }
           {pinned.map((p) => (
             <Marker key={p.id} position={[p.location.lat, p.location.lng]} icon={iconFor(p.status, RESIDENTIAL.has(p.propertyType))}>
               <Popup>
-                <Link href={`/dashboard/inventory/${p.id}`} className="block w-52 space-y-0.5 !text-inherit no-underline">
+                <Link href={`/dashboard/inventory/detail?id=${p.id}`} className="block w-52 space-y-0.5 !text-inherit no-underline">
                   {p.photos[0] && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={thumbOf(p.photos[0])} alt="" className="mb-1 aspect-[4/3] w-full rounded object-cover" />

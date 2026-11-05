@@ -23,15 +23,28 @@
   "hosting": [
     {
       "site": "kasita-crm",
-      "source": "web",
-      "frameworksBackend": {
-        "region": "us-central1",
-        "secrets": [
-          "DF_AI_ENCRYPTION_KEY"
-        ],
-        "maxInstances": 10,
-        "memory": "512MiB"
-      }
+      "public": "web/out",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "cleanUrls": true,
+      "trailingSlash": false,
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": "api"
+        },
+        {
+          "source": "/c/**",
+          "destination": "/c.html"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
     }
   ]
 }
