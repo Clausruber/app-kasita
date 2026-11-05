@@ -12,6 +12,8 @@ import { usePostImages } from "@/hooks/use-post-images";
 import { PostPreview } from "@/components/posts/post-preview";
 import { PropertyPicker } from "@/components/posts/property-picker";
 import { WatermarkedImage } from "@/components/shared/watermarked-image";
+import { PublishedDialog, PublishingDialog, type PublishJob, type PublishResult } from "@/components/posts/publish-dialogs";
+import { platformName } from "@/lib/platforms";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PlatformBadge } from "@/components/shared/platform-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -31,7 +33,9 @@ export default function NewPostPage() {
   const canCreate = useCan()("posts.create");
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
-  const [sending, setSending] = useState(false);
+  const [job, setJob] = useState<PublishJob | null>(null);
+  const [result, setResult] = useState<PublishResult | null>(null);
+  const sending = !!job;
   const images = usePostImages();
   const hasLogo = !!images.data?.logoUrl;
   // The toggle starts at the default from Ajustes → Imágenes until the user flips it.
@@ -56,9 +60,16 @@ export default function NewPostPage() {
 
   async function submit(publishNow: boolean) {
     if (!publishNow && !s.scheduledFor) return toast.error("Elige fecha y hora");
-    setSending(true);
+    const chosen = accounts.filter((a) => s.accountIds.includes(a._id));
+    const current: PublishJob = {
+      publishNow,
+      networks: [...new Set(chosen.map((a) => platformName(a.platform)))],
+      photosWithLogo: withLogo ? s.mediaItems.filter((m) => (m.type ?? "image") === "image" && !isGif(m.url)).length : 0,
+      scheduledFor: publishNow ? null : new Date(s.scheduledFor),
+    };
+    setJob(current);
     try {
-      await api("/api/posts", {
+      const res = await api<{ id: string; status: string }>("/api/posts", {
         method: "POST",
         body: {
           content: s.content,
@@ -71,13 +82,12 @@ export default function NewPostPage() {
           timezone: timezone(),
         },
       });
-      toast.success(publishNow ? "Publicado" : "Post programado");
       s.reset();
-      router.push("/dashboard/posts");
+      setResult({ ...current, status: res.status });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setSending(false);
+      setJob(null);
     }
   }
 
@@ -89,6 +99,8 @@ export default function NewPostPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
+      <PublishingDialog job={job} />
+      <PublishedDialog result={result} onViewPosts={() => router.push("/dashboard/posts")} onNewPost={() => setResult(null)} />
       <div className="flex items-center gap-2">
         <Link href="/dashboard/posts" aria-label="Volver a publicaciones" className={buttonVariants({ variant: "ghost", size: "icon-sm" })}>
           <ArrowLeft />

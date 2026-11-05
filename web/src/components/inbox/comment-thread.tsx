@@ -13,6 +13,7 @@ import type { Message } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { LinkedText } from "@/components/shared/linked-text";
 
 const replyFn = httpsCallable<{ postId: string; messageId?: string; text: string; requestId: string }>(
   functions,
@@ -104,7 +105,7 @@ export function CommentThread({ postId }: { postId: string }) {
                 </span>
               )}
             </div>
-            <p className="mt-1 whitespace-pre-wrap">{m.text}</p>
+            <p className="mt-1 whitespace-pre-wrap"><LinkedText text={m.text ?? ""} /></p>
           </li>
         ))}
       </ul>

@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Building2, LayoutGrid, Map as MapIcon, Plus, Search } from "lucide-react";
-import { useProperties } from "@/hooks/use-properties";
+import { useProperties, useThumbBackfill } from "@/hooks/use-properties";
 import { useCan } from "@/hooks/use-me";
-import { OPERATIONS, PROPERTY_STATUS, PROPERTY_TYPES, daysOnMarket, forRent, forSale, priceLine, specsLine } from "@/lib/property-catalog";
+import { OPERATIONS, PROPERTY_STATUS, PROPERTY_TYPES, daysOnMarket, forRent, forSale, priceLine, specsLine, thumbOf } from "@/lib/property-catalog";
 import type { Operation, Property, PropertyStatus } from "@/lib/types";
 import { DemoDataMenu } from "@/components/inventory/demo-data-menu";
 import { StatusBadge } from "@/components/inventory/status-badge";
@@ -36,7 +36,7 @@ function PropertyCard({ v }: { v: Property }) {
       <div className="relative aspect-[4/3] bg-muted">
         {v.photos[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={v.photos[0].url} alt={v.title} className="size-full object-cover" loading="lazy" />
+          <img src={thumbOf(v.photos[0])} alt={v.title} className="size-full object-cover" loading="lazy" />
         ) : (
           <Building2 className="absolute inset-0 m-auto size-10 text-muted-foreground/50" />
         )}
@@ -80,6 +80,7 @@ function PropertyCard({ v }: { v: Property }) {
 /** Propiedades: every listing with its cover photo, status, price and days on the market. */
 export default function InventoryPage() {
   const { data, isLoading, error } = useProperties();
+  useThumbBackfill(data?.properties);
   const canEdit = useCan()("inventory.edit");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<PropertyStatus | "activos" | "all">("activos");

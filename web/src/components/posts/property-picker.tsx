@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Building2, Check, Search, X } from "lucide-react";
 import { useProperties } from "@/hooks/use-properties";
-import { priceLine } from "@/lib/property-catalog";
+import { priceLine, thumbOf } from "@/lib/property-catalog";
 import type { Property } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -168,7 +168,7 @@ export function PropertyPicker({
                   )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={ph.url} alt="" className="size-full object-cover" loading="lazy" />
+                  <img src={thumbOf(ph)} alt="" className="size-full object-cover" loading="lazy" />
                   {on && (
                     <span className="absolute top-1 right-1 rounded-full bg-primary p-0.5 text-primary-foreground">
                       <Check className="size-3" />
@@ -189,7 +189,7 @@ function Thumb({ p }: { p: Property }) {
     <div className="relative size-12 shrink-0 overflow-hidden rounded-md bg-muted">
       {p.photos[0] ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={p.photos[0].url} alt="" className="size-full object-cover" loading="lazy" />
+        <img src={thumbOf(p.photos[0])} alt="" className="size-full object-cover" loading="lazy" />
       ) : (
         <Building2 className="absolute inset-0 m-auto size-5 text-muted-foreground/50" />
       )}

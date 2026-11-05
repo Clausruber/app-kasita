@@ -14,6 +14,7 @@ import type { Message, Post } from "@/lib/types";
 import { Avatar, type Commenter } from "@/components/inbox/commenter-list";
 import { BookingChip, Composer, QuoteChip, type SendInput } from "@/components/inbox/composer";
 import { cn } from "@/lib/utils";
+import { LinkedText } from "@/components/shared/linked-text";
 
 const replyFn = httpsCallable<{ postId: string; messageId: string; requestId: string } & SendInput>(
   functions,
@@ -96,7 +97,7 @@ export function Conversation({
                     )}
                   >
                     {!mine && <p className="text-xs font-semibold">{commenter.name}</p>}
-                    {m.text}
+                    <LinkedText text={m.text ?? ""} />
                     {m.attachmentUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={m.attachmentUrl} alt="Anexo" className="mt-2 max-h-48 rounded-lg" />

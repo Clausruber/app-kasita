@@ -13,6 +13,7 @@ import type { Conversation, Message } from "@/lib/types";
 import { Avatar } from "@/components/inbox/commenter-list";
 import { BookingChip, Composer, type SendInput } from "@/components/inbox/composer";
 import { cn } from "@/lib/utils";
+import { LinkedText } from "@/components/shared/linked-text";
 
 const replyFn = httpsCallable<{ conversationId: string; messageId?: string; requestId: string } & SendInput>(functions, "kfReplyToDm");
 const suggestFn = httpsCallable<{ conversationId: string; messageId: string; note?: string }, { reply: string }>(functions, "kfSuggestReply");
@@ -103,7 +104,7 @@ export function DmThread({ conversation, messages }: { conversation: Conversatio
                     mine ? "rounded-tr-sm bg-primary text-primary-foreground" : "rounded-tl-sm bg-muted",
                   )}
                 >
-                  {m.text}
+                  <LinkedText text={m.text ?? ""} />
                   {m.attachments?.map((a) => (
                     <a
                       key={a.url}

@@ -10,6 +10,8 @@ import { zernio } from "@/lib/zernio";
 const MAX_BYTES = 15 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 const JPEG_QUALITY = 88;
+// Longest side of the copies with logo: above what Instagram (1440 px) and Facebook (2048 px) show.
+const MAX_SIDE = 2048;
 // Images are only downloaded from where the app itself stores them (no arbitrary URLs: SSRF).
 const ALLOWED_HOSTS = ["media.zernio.com", "firebasestorage.googleapis.com", "storage.googleapis.com"];
 
@@ -46,8 +48,12 @@ export async function download(url: string, what: string) {
 
 /** Burns the logo into a copy of the photo (JPEG). The original is never modified. */
 export async function renderWatermark(photo: Buffer, logo: Buffer, s: PostImageSettings) {
-  // Apply EXIF rotation first so the box is computed on the photo as people see it.
-  const base = await sharp(photo).rotate().toBuffer({ resolveWithObject: true });
+  // Apply EXIF rotation and the size cap first so the box is computed on the photo as people see it
+  // (the logo is a % of the width, so it keeps the same proportions as the preview).
+  const base = await sharp(photo)
+    .rotate()
+    .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: "inside", withoutEnlargement: true })
+    .toBuffer({ resolveWithObject: true });
   const meta = await sharp(logo).metadata();
   if (!meta.width || !meta.height) throw new Error("Logo sin dimensiones");
   const box = logoBox(base.info.width, base.info.height, meta.width, meta.height, s);
@@ -61,7 +67,8 @@ export async function renderWatermark(photo: Buffer, logo: Buffer, s: PostImageS
     .toBuffer();
   return sharp(base.data)
     .composite([{ input: mark, left: Math.max(0, box.left), top: Math.max(0, box.top) }])
-    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+    // Plain libjpeg: mozjpeg was ~9× slower (≈14 s per photo on the 512 MiB server) for ~5% smaller files.
+    .jpeg({ quality: JPEG_QUALITY })
     .toBuffer();
 }
 

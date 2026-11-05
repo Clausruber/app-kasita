@@ -8,6 +8,8 @@ import { adminBucket, adminDb } from "@/lib/firebase/admin";
 import { dealsCol, salesCol, tasksCol, propertyDoc, propertiesCol } from "@/lib/firebase/paths";
 import { DEMO_COUNT, DEMO_PHOTO_SIZE, demoPhotos, demoProperty } from "@/lib/demo-inventory";
 import { parsePropertyInput } from "@/lib/properties";
+import { thumbPathOf } from "@/lib/property-catalog";
+import { renderThumb } from "@/lib/property-thumbs";
 import type { PropertyPhoto } from "@/lib/types";
 
 const BATCH = 400;
@@ -64,20 +66,24 @@ async function attachDemoPhotos(uid: string, ids: string[], origin: string) {
       const data = await readDemoPhoto(name, origin);
       sizes.set(name, data.length);
       await bucket.file(`${staging}${name}.jpg`).save(data, { contentType: "image/jpeg", resumable: false });
+      await bucket.file(`${staging}${name}_thumb.jpg`).save(await renderThumb(data), { contentType: "image/jpeg", resumable: false });
     });
     const copies = plan.flatMap((p) => p.names.map((name) => ({ id: p.id, name })));
     const done = await pool(copies, 8, async ({ id, name }) => {
       const token = randomUUID();
+      const thumbToken = randomUUID();
       const path = `${propertyDoc(uid, id)}/${randomUUID()}.jpg`;
-      await bucket.file(`${staging}${name}.jpg`).copy(path, {
-        contentType: "image/jpeg",
-        cacheControl: "public,max-age=31536000",
-        metadata: { firebaseStorageDownloadTokens: token },
-      });
+      const thumbPath = thumbPathOf(path);
+      const copy = (from: string, to: string, t: string) =>
+        bucket.file(from).copy(to, { contentType: "image/jpeg", cacheControl: "public,max-age=31536000", metadata: { firebaseStorageDownloadTokens: t } });
+      await Promise.all([copy(`${staging}${name}.jpg`, path, token), copy(`${staging}${name}_thumb.jpg`, thumbPath, thumbToken)]);
+      const dl = (p: string, t: string) => `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(p)}?alt=media&token=${t}`;
       const [w, h] = DEMO_PHOTO_SIZE[name] ?? [0, 0];
       const photo: PropertyPhoto = {
         path,
-        url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`,
+        url: dl(path, token),
+        thumb: dl(thumbPath, thumbToken),
+        thumbPath,
         w,
         h,
         size: sizes.get(name) ?? 0,

@@ -3,7 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { HttpError, withPerm } from "@/lib/auth-guard";
 import { adminBucket, adminDb } from "@/lib/firebase/admin";
 import { propertyDoc } from "@/lib/firebase/paths";
-import { MAX_PHOTOS } from "@/lib/property-catalog";
+import { MAX_PHOTOS, thumbPathOf } from "@/lib/property-catalog";
 import type { PropertyPhoto } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -28,12 +28,21 @@ export const POST = withPerm<Ctx>("inventory.edit", async (req, user, { params }
     throw new HttpError(400, "URL de foto no válida");
   }
   if (url.host !== STORAGE_HOST || url.protocol !== "https:") throw new HttpError(400, "URL de foto no válida");
+  // Optional thumbnail uploaded with it: must be the photo's own "_thumb.jpg" in Storage.
+  let thumb: URL | null = null;
+  try {
+    thumb = body.thumb && body.thumbPath === thumbPathOf(body.path) ? new URL(String(body.thumb)) : null;
+  } catch {
+    thumb = null;
+  }
+  if (thumb && (thumb.host !== STORAGE_HOST || thumb.protocol !== "https:")) thumb = null;
   const photo: PropertyPhoto = {
     path: body.path,
     url: url.toString(),
     size: Math.max(0, Number(body.size) || 0),
     ...(Number(body.w) > 0 ? { w: Math.round(Number(body.w)) } : {}),
     ...(Number(body.h) > 0 ? { h: Math.round(Number(body.h)) } : {}),
+    ...(thumb ? { thumb: thumb.toString(), thumbPath: body.thumbPath } : {}),
   };
   const ref = adminDb.doc(propertyDoc(user.uid, id));
   const photos = await adminDb.runTransaction(async (tx) => {
@@ -81,9 +90,10 @@ export const DELETE = withPerm<Ctx>("inventory.edit", async (req, user, { params
     tx.update(ref, { photos: next, updatedAt: FieldValue.serverTimestamp() });
     return next;
   });
-  await adminBucket()
-    .file(path)
-    .delete({ ignoreNotFound: true })
-    .catch((e) => console.warn("photo delete", e));
+  for (const p of [path, thumbPathOf(path)])
+    await adminBucket()
+      .file(p)
+      .delete({ ignoreNotFound: true })
+      .catch((e) => console.warn("photo delete", e));
   return NextResponse.json({ photos });
 });

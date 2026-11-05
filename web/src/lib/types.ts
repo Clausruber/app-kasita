@@ -182,7 +182,8 @@ export type ClientBooking = { id: string; service: string; start: string; timezo
 export type PropertyStatus = "borrador" | "disponible" | "apartado" | "vendido" | "rentado";
 export type Operation = "venta" | "renta" | "venta_renta";
 export type CloseKind = "venta" | "renta";
-export type PropertyPhoto = { path: string; url: string; w?: number; h?: number; size: number };
+// thumb: small copy (THUMB_SIDE px) for lists and pickers; absent on photos not yet backfilled.
+export type PropertyPhoto = { path: string; url: string; w?: number; h?: number; size: number; thumb?: string; thumbPath?: string };
 export type PropertyReservation = { dealId: string; amount: number; at: string; expiresAt: string };
 export type PropertyLease = { dealId: string; monthlyRent: number; deposit: number; months: number; start: string; end: string };
 export type Property = {

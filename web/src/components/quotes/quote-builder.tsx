@@ -7,7 +7,7 @@ import { ArrowDown, ArrowUp, Building2, ChevronDown, Images, Link2, Plus, Search
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { MAX_CATALOG_PROPERTIES, MAX_QUOTE_PHOTOS, QUOTE_DEFAULTS, TERM_OPTIONS, quoteFor, termLabel, type Financing, type QuoteDefaults } from "@/lib/quote-math";
-import { OPERATIONS, PROPERTY_TYPES, forRent, forSale, mainPrice, money, priceLine, specsLine } from "@/lib/property-catalog";
+import { OPERATIONS, PROPERTY_TYPES, forRent, forSale, mainPrice, money, priceLine, specsLine, thumbOf } from "@/lib/property-catalog";
 import type { Client, Property } from "@/lib/types";
 import { useProperties } from "@/hooks/use-properties";
 import { HoldWarning } from "@/components/inventory/hold-dialog";
@@ -462,7 +462,7 @@ export function QuoteBuilder({
                               className={cn("relative aspect-[4/3] overflow-hidden rounded-md border-2", n >= 0 ? "border-primary" : "border-transparent opacity-60 hover:opacity-100")}
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={p.url} alt="" className="size-full object-cover" loading="lazy" />
+                              <img src={thumbOf(p)} alt="" className="size-full object-cover" loading="lazy" />
                               {n >= 0 && (
                                 <span className="absolute top-0.5 left-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
                                   {n + 1}
@@ -524,7 +524,7 @@ export function QuoteBuilder({
 function Thumb({ v }: { v: Property }) {
   return v.photos[0] ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={v.photos[0].url} alt="" className="size-11 shrink-0 rounded object-cover" />
+    <img src={thumbOf(v.photos[0])} alt="" className="size-11 shrink-0 rounded object-cover" />
   ) : (
     <span className="flex size-11 shrink-0 items-center justify-center rounded bg-muted">
       <Building2 className="size-4 text-muted-foreground" />

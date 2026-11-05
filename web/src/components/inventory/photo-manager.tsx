@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, ImagePlus, Star, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { MAX_PHOTOS } from "@/lib/property-catalog";
+import { MAX_PHOTOS, thumbOf } from "@/lib/property-catalog";
 import { uploadPropertyPhoto } from "@/lib/property-photos";
 import type { Property, PropertyPhoto } from "@/lib/types";
 import { useCan, useWorkspaceUid } from "@/hooks/use-me";
@@ -145,7 +145,7 @@ export function PhotoManager({ property, onChange }: { property: Property; onCha
                 className={cn("group relative aspect-[4/3] overflow-hidden rounded-lg bg-muted", dragFrom === i && "opacity-40")}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.url} alt={`Foto ${i + 1}`} className="size-full object-cover" loading="lazy" />
+                <img src={thumbOf(p)} alt={`Foto ${i + 1}`} className="size-full object-cover" loading="lazy" />
                 {i === 0 && (
                   <span className="absolute top-1 left-1 flex items-center gap-0.5 rounded bg-black/60 px-1.5 text-[11px] text-white">
                     <Star className="size-3 fill-current" /> Portada

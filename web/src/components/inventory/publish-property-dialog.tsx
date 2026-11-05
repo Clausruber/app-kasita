@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Megaphone, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
+import { thumbOf } from "@/lib/property-catalog";
 import type { Property } from "@/lib/types";
 import { useComposeStore } from "@/stores/compose-store";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,7 @@ export function PublishPropertyDialog({ property }: { property: Property }) {
                     className={cn("relative block aspect-square w-full overflow-hidden rounded-md ring-2", on ? "ring-primary" : "opacity-50 ring-transparent")}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt="" className="size-full object-cover" />
+                    <img src={thumbOf(p)} alt="" className="size-full object-cover" />
                     {on && (
                       <span className="absolute top-0.5 right-0.5 rounded-full bg-primary p-0.5 text-primary-foreground">
                         <Check className="size-3" />

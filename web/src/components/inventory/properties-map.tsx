@@ -5,7 +5,7 @@ import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import L from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
-import { priceLine, specsLine, statusLabel } from "@/lib/property-catalog";
+import { priceLine, specsLine, statusLabel, thumbOf } from "@/lib/property-catalog";
 import type { Property, PropertyStatus } from "@/lib/types";
 
 // Pin colour per status (same hues as StatusBadge).
@@ -98,7 +98,7 @@ export default function PropertiesMap({ properties }: { properties: Property[] }
                 <Link href={`/dashboard/inventory/${p.id}`} className="block w-52 space-y-0.5 !text-inherit no-underline">
                   {p.photos[0] && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.photos[0].url} alt="" className="mb-1 aspect-[4/3] w-full rounded object-cover" />
+                    <img src={thumbOf(p.photos[0])} alt="" className="mb-1 aspect-[4/3] w-full rounded object-cover" />
                   )}
                   <span className="block text-sm font-semibold">{p.title || p.propertyType}</span>
                   <span className="block font-medium">{priceLine(p)}</span>

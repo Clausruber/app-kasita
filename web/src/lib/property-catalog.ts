@@ -85,6 +85,14 @@ export function specsLine(p: Pick<Property, "bedrooms" | "bathrooms" | "halfBath
 
 export const MAX_PHOTOS = 30;
 
+// Thumbnails for lists and pickers: ~30–60 KB instead of the 1920 px photo.
+export const THUMB_SIDE = 480;
+export const THUMB_QUALITY = 0.75;
+/** Storage path of a photo's thumbnail: same folder, "{name}_thumb.jpg". */
+export const thumbPathOf = (path: string) => path.replace(/\.[a-z0-9]+$/i, "") + "_thumb.jpg";
+/** The URL to show a photo small: its thumbnail when it has one, else the photo itself. */
+export const thumbOf = (p: { url: string; thumb?: string } | undefined) => p?.thumb || p?.url || "";
+
 export const daysOnMarket = (intakeDate: string, closedAt?: string | null) =>
   Math.max(0, Math.floor(((closedAt ? new Date(closedAt) : new Date()).getTime() - new Date(intakeDate).getTime()) / 86_400_000));
 
