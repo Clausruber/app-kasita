@@ -1,10 +1,26 @@
 "use client";
 
-import { Fragment, useEffect, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { BellRing, Building2, CalendarCheck, CalendarDays, Clock, FileText, Inbox, KanbanSquare, Lock, LogOut, Newspaper, Settings, ShieldCheck, UserRound } from "lucide-react";
+import {
+  BellRing,
+  Building2,
+  CalendarCheck,
+  CalendarDays,
+  Clock,
+  FileText,
+  Inbox,
+  KanbanSquare,
+  Lock,
+  LogOut,
+  Menu,
+  Newspaper,
+  Settings,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useInbox } from "@/hooks/use-firestore";
@@ -13,6 +29,7 @@ import { useTaskBadge } from "@/hooks/use-tasks";
 import { can } from "@/lib/permissions";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 // `perm`: access key a team member needs (lib/permissions.ts). Ajustes always opens (Perfil is for everyone).
@@ -90,11 +107,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const me = useMe();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Client-side guard; the real security is in the API (ID token) and Firestore rules.
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   if (loading || !user || me.isLoading) {
     return <div className="flex flex-1 items-center justify-center text-muted-foreground">Cargando…</div>;
@@ -109,22 +132,110 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const blocked = !!current && !allowed.includes(current);
 
   return (
-    <div className="flex flex-1 flex-col md:flex-row">
-      {/* Fixed while the page scrolls: a top bar on mobile, the full-height sidebar on desktop. */}
-      <aside className="sticky top-0 z-30 flex shrink-0 flex-col gap-1 border-b bg-background p-3 md:h-dvh md:w-56 md:self-start md:overflow-y-auto md:border-r md:border-b-0">
-        {/* Logo 43px high (fills the 224px sidebar), separated from the menu by a line. */}
+    <div className="flex min-h-dvh flex-col md:flex-row">
+      {/* ── MOBILE HEADER (Mode Mobile < md) ── */}
+      <header className="sticky top-0 z-30 flex h-14 w-full items-center justify-between border-b bg-background px-3 md:hidden">
+        {/* Left: Hamburger menu button */}
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-foreground"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Abrir menú"
+          >
+            <Menu className="size-5" />
+          </Button>
+        </div>
+
+        {/* Center: Brand Logo perfectly centered */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center">
+          <Link href="/dashboard/inventory" className="flex items-center justify-center">
+            <BrandLogo className="h-[36px] max-w-[150px]" />
+          </Link>
+        </div>
+
+        {/* Right: Quick shortcut to Inbox */}
+        <div className="flex items-center">
+          <Link
+            href="/dashboard/inbox"
+            className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Ir a Inbox"
+          >
+            <Inbox className="size-5" />
+          </Link>
+        </div>
+      </header>
+
+      {/* ── MOBILE DRAWER / SHEET ── */}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="flex w-[280px] max-w-[85vw] flex-col p-0">
+          <SheetHeader className="border-b px-4 py-3.5 text-center">
+            <div className="flex items-center justify-center">
+              <BrandLogo className="h-[38px] max-w-full" />
+            </div>
+            <SheetTitle className="sr-only">Navegación de Kasita</SheetTitle>
+          </SheetHeader>
+
+          {/* Scrollable vertical nav in drawer */}
+          <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+            {nav.map(({ href, label, icon: Icon, group }, i) => (
+              <Fragment key={href}>
+                {i > 0 && nav[i - 1].group !== group && (
+                  <div className="my-2 border-t border-border/60" />
+                )}
+                <Link
+                  href={href}
+                  onClick={() => setMobileOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-muted",
+                    pathname.startsWith(href)
+                      ? "bg-muted font-semibold text-primary"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  <span className="flex-1">{label}</span>
+                  {href === "/dashboard/inbox" && <UnreadBadge />}
+                  {href === "/dashboard/tasks" && <TaskBadge />}
+                </Link>
+              </Fragment>
+            ))}
+          </nav>
+
+          {/* User profile & Sign out */}
+          <div className="border-t bg-muted/20 p-3">
+            <p className="truncate px-2 text-xs text-muted-foreground">{user.email}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => {
+                setMobileOpen(false);
+                signOut(auth);
+              }}
+            >
+              <LogOut className="size-4 mr-2" /> Cerrar sesión
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── DESKTOP SIDEBAR (>= md) ── */}
+      <aside className="sticky top-0 z-30 hidden md:flex shrink-0 flex-col gap-1 border-r bg-background p-3 md:h-dvh md:w-56 md:overflow-y-auto">
         <div className="mb-2 flex items-center border-b px-2 pt-1 pb-3">
           <BrandLogo className="h-[43px] max-w-full" />
         </div>
-        <nav className="flex gap-1 overflow-x-auto md:flex-col">
+        <nav className="flex flex-col gap-1">
           {nav.map(({ href, label, icon: Icon, group }, i) => (
             <Fragment key={href}>
-              {/* Separator between groups: horizontal line in the sidebar, vertical in the mobile top bar. */}
-              {i > 0 && nav[i - 1].group !== group && <span aria-hidden className="mx-1 w-px shrink-0 self-stretch bg-border md:mx-2 md:my-1.5 md:h-px md:w-auto" />}
+              {i > 0 && nav[i - 1].group !== group && (
+                <span aria-hidden className="mx-2 my-1.5 h-px bg-border" />
+              )}
               <Link
                 href={href}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap hover:bg-muted",
+                  "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted",
                   pathname.startsWith(href) && "bg-muted font-medium",
                 )}
               >
@@ -136,13 +247,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </Fragment>
           ))}
         </nav>
-        <div className="mt-auto hidden pt-4 md:block">
+        <div className="mt-auto pt-4">
           <p className="truncate px-2 text-xs text-muted-foreground">{user.email}</p>
           <Button variant="ghost" size="sm" className="mt-1 w-full justify-start" onClick={() => signOut(auth)}>
             <LogOut /> Cerrar sesión
           </Button>
         </div>
       </aside>
+
+      {/* ── MAIN CONTENT ── */}
       <main className="min-w-0 flex-1 p-4 md:p-6">{blocked ? <NoAccess /> : children}</main>
     </div>
   );
